@@ -28,8 +28,15 @@ type Metadata struct {
 	Disc  int
 }
 
+// Options contains configuration parameters for file processing
+type Options struct {
+	DestDir  string
+	Override bool
+	Move     bool
+}
+
 // TODO return processing result errors that indicate skipped files
-func processFile(srcPath string, destDir string, override bool, move bool) error {
+func processFile(srcPath string, opts *Options) error {
 	// read metadata from file
 	f, err := os.Open(srcPath)
 	if err != nil {
@@ -87,11 +94,11 @@ func processFile(srcPath string, destDir string, override bool, move bool) error
 	// TODO remove newlines and tabs from pathStr in case the template is "bad"
 
 	// parse text as path
-	newFileName := filepath.Join(destDir, pathStr.String())
+	newFileName := filepath.Join(opts.DestDir, pathStr.String())
 	// newDir := filepath.Dir(newFileName)
 
 	// check if path exists, skip file if override is not set
-	if !override {
+	if !opts.Override {
 		if _, err := os.Stat(newFileName); err == nil {
 			// TODO return skip error instead
 			fmt.Printf("File %s already exists, skipping\n", newFileName)
@@ -106,11 +113,10 @@ func processFile(srcPath string, destDir string, override bool, move bool) error
 }
 
 func main() {
-
 	// Define command line flags
-
 	override := flag.Bool("override", false, "Override existing files")
 	move := flag.Bool("move", false, "Move files instead of copying")
+	// TODO add flag for dry-run
 	// TODO add flag for template and/or template file
 	// TODO add flag for verbosity and help
 
@@ -123,6 +129,13 @@ func main() {
 	srcDir := args[0]
 	destDir := args[1]
 
+	// Create options struct with inline initialization
+	opts := &Options{
+		DestDir:  destDir,
+		Override: *override,
+		Move:     *move,
+	}
+
 	// iterate over all files in source directory
 	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -132,7 +145,7 @@ func main() {
 			return nil
 		}
 
-		err = processFile(path, destDir, *override, *move)
+		err = processFile(path, opts)
 
 		if err == tag.ErrNoTagsFound {
 			fmt.Printf("No tags found in file %s, skipping\n", path)
@@ -148,3 +161,4 @@ func main() {
 		os.Exit(1)
 	}
 }
+
