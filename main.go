@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"text/template"
@@ -33,6 +34,7 @@ type Options struct {
 	DestDir  string
 	Override bool
 	Move     bool
+	DryRun   bool
 }
 
 // TODO return processing result errors that indicate skipped files
@@ -93,9 +95,10 @@ func processFile(srcPath string, opts *Options) error {
 
 	// TODO remove newlines and tabs from pathStr in case the template is "bad"
 
+	// TODO check for path traversal attacks and skip if detected
+
 	// parse text as path
 	newFileName := filepath.Join(opts.DestDir, pathStr.String())
-	// newDir := filepath.Dir(newFileName)
 
 	// check if path exists, skip file if override is not set
 	if !opts.Override {
@@ -106,9 +109,34 @@ func processFile(srcPath string, opts *Options) error {
 		}
 	}
 
-	fmt.Printf("Processing file %s -> %s\n", srcPath, newFileName)
+	if opts.DryRun {
+		fmt.Printf("Processing file %s -> %s\n", srcPath, newFileName)
+		return nil
+	}
 	// create destination directory if it does not exist
+	err = os.MkdirAll(filepath.Dir(newFileName), 0755)
+	if err != nil {
+		return fmt.Errorf("error creating directory %s: %v", filepath.Dir(newFileName), err)
+	}
+
 	// move/copy file to destination directory, delete original file if move is set
+	if opts.Move {
+		err = os.Rename(srcPath, newFileName)
+		if err != nil {
+			return fmt.Errorf("error moving file %s to %s: %v", srcPath, newFileName, err)
+		}
+	} else {
+		destFile, err := os.Create(newFileName)
+		if err != nil {
+			return fmt.Errorf("error creating file %s: %v", newFileName, err)
+		}
+		defer destFile.Close()
+		_, err = io.Copy(destFile, f)
+		if err != nil {
+			return fmt.Errorf("error copying file %s to %s: %v", srcPath, newFileName, err)
+		}
+	}
+
 	return nil
 }
 
@@ -116,12 +144,13 @@ func main() {
 	// Define command line flags
 	override := flag.Bool("override", false, "Override existing files")
 	move := flag.Bool("move", false, "Move files instead of copying")
-	// TODO add flag for dry-run
+	dryRun := flag.Bool("dry-run", false, "Do not move/copy files, just print the new file names")
 	// TODO add flag for template and/or template file
 	// TODO add flag for verbosity and help
 
 	flag.Parse()
 	args := flag.Args()
+	// TODO make destDir optional, path can also bet set in template
 	if len(args) < 2 {
 		flag.Usage()
 		return
@@ -134,6 +163,7 @@ func main() {
 		DestDir:  destDir,
 		Override: *override,
 		Move:     *move,
+		DryRun:   *dryRun,
 	}
 
 	// iterate over all files in source directory
