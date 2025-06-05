@@ -248,6 +248,38 @@ func (m *MediaSorter) ProcessFile(srcPath string) error {
 	return nil
 }
 
+func (m *MediaSorter) Sort(srcDir string) error {
+	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		// TODO recusion through subdirectories?
+		if info.IsDir() {
+			return nil
+		}
+
+		// TODO check for sidecar files (e.g. lrc) and send them as optional directories, mediasorter should pass them to the fileprocessor
+		err = m.ProcessFile(path)
+
+		// TODO use custom output class to implement verbosity, instead of printing directly
+		if err == tag.ErrNoTagsFound {
+			fmt.Printf("No tags found in file %s, skipping\n", path)
+			return nil
+		}
+
+		switch err.(type) {
+		case *FileExistsError:
+			fmt.Print(err.Error())
+		case *NotAMediaFileError:
+			fmt.Print(err.Error())
+		default:
+			return err
+		}
+
+		return nil
+	})
+}
+
 func main() {
 	// Define command line flags
 	override := flag.Bool("override", false, "Override existing files")
@@ -290,6 +322,7 @@ func main() {
 	if err != nil {
 		panic(fmt.Sprintf("Error parsing template: %v", err))
 	}
+	// TODO add custom functions for normalizing names - underscores instead of spaces, transform unicode, etc
 
 	mediaSorter := &MediaSorter{
 		DestDir:        destDir,
@@ -297,37 +330,8 @@ func main() {
 		FileProcessors: fileProcessors,
 		MetadataReader: &MetaDataReader{slog.Default()},
 	}
+	err = mediaSorter.Sort(srcDir)
 
-	// TODO move into MediaSorter class
-	// iterate over all files in source directory
-	err = filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		// TODO recusion through subdirectories?
-		if info.IsDir() {
-			return nil
-		}
-
-		// TODO check for sidecar files (e.g. lrc) and send them as optional directrories, mediasorter should pass them to the fileprocessor
-		err = mediaSorter.ProcessFile(path)
-
-		if err == tag.ErrNoTagsFound {
-			fmt.Printf("No tags found in file %s, skipping\n", path)
-			return nil
-		}
-
-		switch err.(type) {
-		case *FileExistsError:
-			fmt.Print(err.Error())
-		case *NotAMediaFileError:
-			fmt.Print(err.Error())
-		default:
-			return err
-		}
-
-		return nil
-	})
 	if err != nil {
 		fmt.Println("Error:", err)
 		os.Exit(1)
