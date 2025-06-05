@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	"github.com/dhowden/tag"
@@ -208,6 +209,11 @@ func (m *MoveProcessor) ProcessFile(srcPath string, destPath string) error {
 	return nil
 }
 
+type FileGroup struct {
+	MediaFile    string
+	SidecarFiles []string
+}
+
 type MediaSorter struct {
 	DestDir        string
 	PathTemplate   *template.Template
@@ -215,8 +221,8 @@ type MediaSorter struct {
 	FileProcessors []FileProcessor
 }
 
-func (m *MediaSorter) ProcessFile(srcPath string) error {
-	metadata, err := m.MetadataReader.ReadMetadata(srcPath)
+func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
+	metadata, err := m.MetadataReader.ReadMetadata(group.MediaFile)
 
 	if err != nil {
 		re, ok := err.(*NotAMediaFileError)
@@ -236,12 +242,27 @@ func (m *MediaSorter) ProcessFile(srcPath string) error {
 
 	// TODO check for path traversal attacks and skip if detected
 
-	destPath := filepath.Join(m.DestDir, pathStr.String())
+	// Process the main media file
+	mediaExt := filepath.Ext(group.MediaFile)
+	destPath := filepath.Join(m.DestDir, pathStr.String()+mediaExt)
 
 	for _, processor := range m.FileProcessors {
-		err := processor.ProcessFile(srcPath, destPath)
+		err := processor.ProcessFile(group.MediaFile, destPath)
 		if err != nil {
 			return err
+		}
+	}
+
+	// Process sidecar files
+	for _, sidecarFile := range group.SidecarFiles {
+		sidecarExt := filepath.Ext(sidecarFile)
+		sidecarDestPath := filepath.Join(m.DestDir, pathStr.String()+sidecarExt)
+		
+		for _, processor := range m.FileProcessors {
+			err := processor.ProcessFile(sidecarFile, sidecarDestPath)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -249,35 +270,94 @@ func (m *MediaSorter) ProcessFile(srcPath string) error {
 }
 
 func (m *MediaSorter) Sort(srcDir string) error {
-	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+	// First pass: collect all files and group by basename
+	fileGroups := make(map[string][]string)
+	
+	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		// TODO recusion through subdirectories?
 		if info.IsDir() {
 			return nil
 		}
-
-		// TODO check for sidecar files (e.g. lrc) and send them as optional directories, mediasorter should pass them to the fileprocessor
-		err = m.ProcessFile(path)
-
-		// TODO use custom output class to implement verbosity, instead of printing directly
-		if err == tag.ErrNoTagsFound {
-			fmt.Printf("No tags found in file %s, skipping\n", path)
-			return nil
-		}
-
-		switch err.(type) {
-		case *FileExistsError:
-			fmt.Print(err.Error())
-		case *NotAMediaFileError:
-			fmt.Print(err.Error())
-		default:
-			return err
-		}
-
+		
+		// Group files by basename (filename without extension)
+		basename := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		fileGroups[basename] = append(fileGroups[basename], path)
+		
 		return nil
 	})
+	
+	if err != nil {
+		return err
+	}
+	
+	// Second pass: process each group
+	for _, files := range fileGroups {
+		if len(files) == 0 {
+			continue
+		}
+		
+		// Find the media file in the group
+		var mediaFile string
+		var sidecarFiles []string
+		
+		for _, file := range files {
+			// Try to identify if this is a media file
+			f, err := os.Open(file)
+			if err != nil {
+				continue
+			}
+			
+			_, _, err = tag.Identify(f)
+			f.Close()
+			
+			if err == nil {
+				// This is a media file
+				if mediaFile == "" {
+					mediaFile = file
+				} else {
+					// Multiple media files with same basename - treat others as sidecars
+					sidecarFiles = append(sidecarFiles, file)
+				}
+			} else {
+				// This is a sidecar file
+				sidecarFiles = append(sidecarFiles, file)
+			}
+		}
+		
+		// If we found a media file, process the group
+		if mediaFile != "" {
+			group := &FileGroup{
+				MediaFile:    mediaFile,
+				SidecarFiles: sidecarFiles,
+			}
+			
+			err := m.ProcessFileGroup(group)
+			
+			// TODO use custom output class to implement verbosity, instead of printing directly
+			if err == tag.ErrNoTagsFound {
+				fmt.Printf("No tags found in file %s, skipping\n", mediaFile)
+				continue
+			}
+			
+			switch err.(type) {
+			case *FileExistsError:
+				fmt.Print(err.Error())
+			case *NotAMediaFileError:
+				fmt.Print(err.Error())
+			case nil:
+				// Success, continue
+			default:
+				return err
+			}
+		} else {
+			// No media file found in this group, skip all files
+			fmt.Printf("No media file found for basename %s, skipping group\n", filepath.Base(files[0]))
+		}
+	}
+	
+	return nil
 }
 
 func main() {
