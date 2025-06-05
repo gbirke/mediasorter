@@ -30,14 +30,6 @@ type Metadata struct {
 	Disc  int
 }
 
-// Options contains configuration parameters for file processing
-type Options struct {
-	DestDir  string
-	Override bool
-	Move     bool
-	DryRun   bool
-}
-
 type MetaDataReader struct {
 	logger *slog.Logger
 }
@@ -104,33 +96,127 @@ func (n *NoOverrideChecker) DestinationFileExists(destPath string) bool {
 	return false
 }
 
-// TODO add checker implementations for
-// - chaining,
-// - Memory-only (using map[string]struct{} for keeping file names)
-// - filesystem check
+type FilesystemOverrideChecker struct{}
 
-// TODO extract implementations from processFile:
-// - OutputProcessor (gets Memory-only OverrideChecker as dependency when doing a dry run, otherwise NoOverrideChecker)
-// - DestinationCreationProcessor
-// - CopyProcessor (gets OverrideChecker as dependency)
-// - MoveProcessor (gets OverrideChecker as dependency)
+func (f *FilesystemOverrideChecker) DestinationFileExists(destPath string) bool {
+	_, err := os.Stat(destPath)
+	return err == nil
+}
+
+type MemoryOverrideChecker struct {
+	SeenFiles map[string]struct{}
+}
+
+func (m *MemoryOverrideChecker) DestinationFileExists(destPath string) bool {
+	if _, exists := m.SeenFiles[destPath]; exists {
+		return true
+	}
+	m.SeenFiles[destPath] = struct{}{}
+	return false
+}
+
+type ChainingOverrideChecker struct {
+	overrideCheckers []OverrideChecker
+}
+
+func (c *ChainingOverrideChecker) DestinationFileExists(destPath string) bool {
+	for _, checker := range c.overrideCheckers {
+		if checker.DestinationFileExists(destPath) {
+			return true
+		}
+	}
+	return false
+}
+
+type FileExistsError struct {
+	srcPath  string
+	destPath string
+}
+
+func (err *FileExistsError) Error() string {
+	return fmt.Sprintf("File %s already exists, skipping %s\n", err.destPath, err.srcPath)
+}
+
 type FileProcessor interface {
-	ProcessFile(srcPath string, destPath string)
+	ProcessFile(srcPath string, destPath string) error
 }
 
-// TODO slowly migrate processFile (and the loop from the main func) into the MediaSorter
-// Build the list of file processors in main, according to CLI options
+type OutputProcessor struct {
+	overrideChecker OverrideChecker
+}
+
+func (o *OutputProcessor) ProcessFile(srcPath string, destPath string) error {
+	if o.overrideChecker.DestinationFileExists(destPath) {
+		return &FileExistsError{destPath, srcPath}
+	}
+	fmt.Printf("Processing file %s -> %s\n", srcPath, destPath)
+	return nil
+}
+
+type CopyProcessor struct {
+	overrideChecker OverrideChecker
+}
+
+func (c *CopyProcessor) ProcessFile(srcPath string, destPath string) error {
+	if c.overrideChecker.DestinationFileExists(destPath) {
+		return &FileExistsError{destPath, srcPath}
+	}
+
+	// create destination directory if it does not exist
+	err := os.MkdirAll(filepath.Dir(destPath), 0755)
+	if err != nil {
+		return fmt.Errorf("error creating directory %s: %v", filepath.Dir(destPath), err)
+	}
+
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("error creating file %s: %v", destPath, err)
+	}
+	defer destFile.Close()
+	f, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("error opening file %s: %v", srcPath, err)
+	}
+	defer f.Close()
+	_, err = io.Copy(destFile, f)
+	if err != nil {
+		return fmt.Errorf("error copying file %s to %s: %v", srcPath, destPath, err)
+	}
+	return nil
+}
+
+type MoveProcessor struct {
+	overrideChecker OverrideChecker
+}
+
+func (m *MoveProcessor) ProcessFile(srcPath string, destPath string) error {
+	if m.overrideChecker.DestinationFileExists(destPath) {
+		return &FileExistsError{destPath, srcPath}
+	}
+
+	// create destination directory if it does not exist
+	err := os.MkdirAll(filepath.Dir(destPath), 0755)
+	if err != nil {
+		return fmt.Errorf("error creating directory %s: %v", filepath.Dir(destPath), err)
+	}
+
+	err = os.Rename(srcPath, destPath)
+	if err != nil {
+		return fmt.Errorf("error moving file %s to %s: %v", srcPath, destPath, err)
+	}
+
+	return nil
+}
+
 type MediaSorter struct {
-	destDir        string
-	pathTemplate   *template.Template
-	metadataReader *MetaDataReader
-	fileProcessors []FileProcessor
+	DestDir        string
+	PathTemplate   *template.Template
+	MetadataReader *MetaDataReader
+	FileProcessors []FileProcessor
 }
 
-// TODO return processing result errors that indicate skipped files
-func processFile(srcPath string, opts *Options) error {
-	reader := &MetaDataReader{slog.Default()}
-	m, err := reader.ReadMetadata(srcPath)
+func (m *MediaSorter) ProcessFile(srcPath string) error {
+	metadata, err := m.MetadataReader.ReadMetadata(srcPath)
 
 	if err != nil {
 		re, ok := err.(*NotAMediaFileError)
@@ -142,64 +228,20 @@ func processFile(srcPath string, opts *Options) error {
 		return err
 	}
 
-	// render metadata as text
-	// TODO move template parsing to main and pass template to processFile
-	templ, err := template.New("path").Parse(defaultPathTemplate)
-	if err != nil {
-		return fmt.Errorf("error parsing template: %v", err)
-	}
 	var pathStr bytes.Buffer
-	if err := templ.Execute(&pathStr, m); err != nil {
+	if err := m.PathTemplate.Execute(&pathStr, metadata); err != nil {
 		return fmt.Errorf("error executing template: %v", err)
 	}
-
 	// TODO remove newlines and tabs from pathStr in case the template is "bad"
 
 	// TODO check for path traversal attacks and skip if detected
 
-	// parse text as path
-	newFileName := filepath.Join(opts.DestDir, pathStr.String())
+	destPath := filepath.Join(m.DestDir, pathStr.String())
 
-	// check if path exists, skip file if override is not set
-	if !opts.Override {
-		// TODO if dry-run is set, use a different check, e.g. hash map
-		if _, err := os.Stat(newFileName); err == nil {
-			// TODO return skip error instead
-			fmt.Printf("File %s already exists, skipping\n", newFileName)
-			return nil
-		}
-	}
-
-	if opts.DryRun {
-		fmt.Printf("Processing file %s -> %s\n", srcPath, newFileName)
-		return nil
-	}
-	// create destination directory if it does not exist
-	err = os.MkdirAll(filepath.Dir(newFileName), 0755)
-	if err != nil {
-		return fmt.Errorf("error creating directory %s: %v", filepath.Dir(newFileName), err)
-	}
-
-	// move/copy file to destination directory, delete original file if move is set
-	if opts.Move {
-		err = os.Rename(srcPath, newFileName)
+	for _, processor := range m.FileProcessors {
+		err := processor.ProcessFile(srcPath, destPath)
 		if err != nil {
-			return fmt.Errorf("error moving file %s to %s: %v", srcPath, newFileName, err)
-		}
-	} else {
-		destFile, err := os.Create(newFileName)
-		if err != nil {
-			return fmt.Errorf("error creating file %s: %v", newFileName, err)
-		}
-		defer destFile.Close()
-		f, err := os.Open(srcPath)
-		if err != nil {
-			return fmt.Errorf("error opening file %s: %v", srcPath, err)
-		}
-		defer f.Close()
-		_, err = io.Copy(destFile, f)
-		if err != nil {
-			return fmt.Errorf("error copying file %s to %s: %v", srcPath, newFileName, err)
+			return err
 		}
 	}
 
@@ -209,8 +251,8 @@ func processFile(srcPath string, opts *Options) error {
 func main() {
 	// Define command line flags
 	override := flag.Bool("override", false, "Override existing files")
-	move := flag.Bool("move", false, "Move files instead of copying")
-	dryRun := flag.Bool("dry-run", false, "Do not move/copy files, just print the new file names")
+	//move := flag.Bool("move", false, "Move files instead of copying")
+	//dryRun := flag.Bool("dry-run", false, "Do not move/copy files, just print the new file names")
 	// TODO add flag for template and/or template file
 	// TODO add flag for verbosity and help
 	// TODO add flag for progress bar (mutually exclusive with verbosity)
@@ -219,26 +261,46 @@ func main() {
 	args := flag.Args()
 	// TODO make destDir optional, path can also bet set in template
 	if len(args) < 2 {
+		// TODO add required arguments when printing usage
 		flag.Usage()
 		return
 	}
 	srcDir := args[0]
 	destDir := args[1]
 
-	// TODO use options to build the chained override checkers and the list of file processors
-	//      Drop options at the end
+	var fileProcessors []FileProcessor
+	var overrideChecker OverrideChecker = &NoOverrideChecker{}
 
-	// Create options struct with inline initialization
-	opts := &Options{
-		DestDir:  destDir,
-		Override: *override,
-		Move:     *move,
-		DryRun:   *dryRun,
+	if *override {
+		overrideChecker = &FilesystemOverrideChecker{}
+	}
+
+	fileProcessors = append(fileProcessors, &OutputProcessor{overrideChecker: overrideChecker})
+
+	// TODO re-enable when the new architecture works
+	// if !*dryRun {
+	// 	if *move {
+	// 		fileProcessors = append(fileProcessors, &MoveProcessor{overrideChecker: overrideChecker})
+	// 	} else {
+	// 		fileProcessors = append(fileProcessors, &CopyProcessor{overrideChecker: overrideChecker})
+	// 	}
+	// }
+
+	pathTemplate, err := template.New("path").Parse(defaultPathTemplate)
+	if err != nil {
+		panic(fmt.Sprintf("Error parsing template: %v", err))
+	}
+
+	mediaSorter := &MediaSorter{
+		DestDir:        destDir,
+		PathTemplate:   pathTemplate,
+		FileProcessors: fileProcessors,
+		MetadataReader: &MetaDataReader{slog.Default()},
 	}
 
 	// TODO move into MediaSorter class
 	// iterate over all files in source directory
-	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -247,17 +309,24 @@ func main() {
 			return nil
 		}
 
-		// TODO pass to goroutine for parallel processing of files?
-		err = processFile(path, opts)
+		// TODO check for sidecar files (e.g. lrc) and send them as optional directrories, mediasorter should pass them to the fileprocessor
+		err = mediaSorter.ProcessFile(path)
 
 		if err == tag.ErrNoTagsFound {
 			fmt.Printf("No tags found in file %s, skipping\n", path)
 			return nil
 		}
 
-		// TODO handle skip errors
+		switch err.(type) {
+		case *FileExistsError:
+			fmt.Print(err.Error())
+		case *NotAMediaFileError:
+			fmt.Print(err.Error())
+		default:
+			return err
+		}
 
-		return err
+		return nil
 	})
 	if err != nil {
 		fmt.Println("Error:", err)
