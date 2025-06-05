@@ -86,6 +86,49 @@ func (m *MetaDataReader) ReadMetadata(srcPath string) (*Metadata, error) {
 	return metadata, nil
 }
 
+func (m *MetaDataReader) GetFileGroup(fileCandidates []string) (*FileGroup, error) {
+	if len(fileCandidates) == 0 {
+		return nil, fmt.Errorf("No files found in the group, skipping.")
+	}
+
+	// Find the media file in the group
+	var mediaFile string
+	var sidecarFiles []string
+
+	for _, file := range fileCandidates {
+		// Try to identify if this is a media file
+		f, err := os.Open(file)
+		if err != nil {
+			return nil, fmt.Errorf("error opening file %s: %v", file, err)
+		}
+		defer f.Close()
+
+		_, _, err = tag.Identify(f)
+
+		if err == nil {
+			// This is a media file
+			if mediaFile == "" {
+				mediaFile = file
+			} else {
+				// Multiple media files with same basename - treat others as sidecars
+				sidecarFiles = append(sidecarFiles, file)
+			}
+		} else {
+			// This is a sidecar file
+			sidecarFiles = append(sidecarFiles, file)
+		}
+	}
+
+	if mediaFile == "" {
+		return nil, fmt.Errorf("No media file found in the group, skipping")
+	}
+
+	return &FileGroup{
+		MediaFile:    mediaFile,
+		SidecarFiles: sidecarFiles,
+	}, nil
+}
+
 type OverrideChecker interface {
 	DestinationFileExists(destPath string) bool
 }
@@ -257,7 +300,7 @@ func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
 	for _, sidecarFile := range group.SidecarFiles {
 		sidecarExt := filepath.Ext(sidecarFile)
 		sidecarDestPath := filepath.Join(m.DestDir, pathStr.String()+sidecarExt)
-		
+
 		for _, processor := range m.FileProcessors {
 			err := processor.ProcessFile(sidecarFile, sidecarDestPath)
 			if err != nil {
@@ -269,94 +312,61 @@ func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
 	return nil
 }
 
+// TODO use custom output class instead of fmt.Printf to implement verbosity and colors
 func (m *MediaSorter) Sort(srcDir string) error {
 	// First pass: collect all files and group by basename
 	fileGroups := make(map[string][]string)
-	
+
 	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
+
+		// TODO recursive processing?
 		if info.IsDir() {
 			return nil
 		}
-		
+
 		// Group files by basename (filename without extension)
 		basename := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 		fileGroups[basename] = append(fileGroups[basename], path)
-		
+
 		return nil
 	})
-	
+
 	if err != nil {
 		return err
 	}
-	
+
 	// Second pass: process each group
 	for _, files := range fileGroups {
-		if len(files) == 0 {
+
+		group, err := m.MetadataReader.GetFileGroup(files)
+
+		if err != nil {
+			fmt.Printf("No media file found for basename %s, skipping group\n", filepath.Base(files[0]))
 			continue
 		}
-		
-		// Find the media file in the group
-		var mediaFile string
-		var sidecarFiles []string
-		
-		for _, file := range files {
-			// Try to identify if this is a media file
-			f, err := os.Open(file)
-			if err != nil {
-				continue
-			}
-			
-			_, _, err = tag.Identify(f)
-			f.Close()
-			
-			if err == nil {
-				// This is a media file
-				if mediaFile == "" {
-					mediaFile = file
-				} else {
-					// Multiple media files with same basename - treat others as sidecars
-					sidecarFiles = append(sidecarFiles, file)
-				}
-			} else {
-				// This is a sidecar file
-				sidecarFiles = append(sidecarFiles, file)
-			}
+
+		err = m.ProcessFileGroup(group)
+
+		if err == tag.ErrNoTagsFound {
+			fmt.Printf("No tags found in file %s, skipping\n", group.MediaFile)
+			continue
 		}
-		
-		// If we found a media file, process the group
-		if mediaFile != "" {
-			group := &FileGroup{
-				MediaFile:    mediaFile,
-				SidecarFiles: sidecarFiles,
-			}
-			
-			err := m.ProcessFileGroup(group)
-			
-			// TODO use custom output class to implement verbosity, instead of printing directly
-			if err == tag.ErrNoTagsFound {
-				fmt.Printf("No tags found in file %s, skipping\n", mediaFile)
-				continue
-			}
-			
-			switch err.(type) {
-			case *FileExistsError:
-				fmt.Print(err.Error())
-			case *NotAMediaFileError:
-				fmt.Print(err.Error())
-			case nil:
-				// Success, continue
-			default:
-				return err
-			}
-		} else {
-			// No media file found in this group, skip all files
-			fmt.Printf("No media file found for basename %s, skipping group\n", filepath.Base(files[0]))
+
+		switch err.(type) {
+		case *FileExistsError:
+			fmt.Print(err.Error())
+		case *NotAMediaFileError:
+			fmt.Print(err.Error())
+		case nil:
+			// Success, continue
+		default:
+			return err
 		}
 	}
-	
+
 	return nil
 }
 
