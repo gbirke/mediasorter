@@ -1,0 +1,4 @@
+# Ignore build artifacts when using nix
+/gomod2nix-template
+result
+.direnv/
