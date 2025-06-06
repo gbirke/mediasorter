@@ -2,3 +2,6 @@
 /gomod2nix-template
 result
 .direnv/
+
+# Agnore artifacts from the bullshit machine
+.aider*
