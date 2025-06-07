@@ -211,20 +211,24 @@ func (m *MediaSorter) Sort(srcDir string) error {
 }
 
 func main() {
+	var verbosity int
 	app := &cli.Command{
-		Name:  "media-sorter",
-		Usage: "Move media files into subdirectories, based on their metadata and a path template",
+		Name:                   "media-sorter",
+		Usage:                  fmt.Sprintf("Copy or move media files into subdirectories, based on their metadata and a path template.\n\nDefault Template: %s", defaultPathTemplate),
+		UseShortOptionHandling: true,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "override",
 				Usage: "Override existing files",
 			},
-			&cli.IntFlag{
-				Name:  "verbosity",
-				Value: 1,
-				Usage: "Verbosity level: 0=quiet, 1=verbose, 2=debug",
+			&cli.BoolFlag{
+				Name:    "verbose",
+				Aliases: []string{"v"},
+				Usage:   "Set verbosity",
+				Config: cli.BoolConfig{
+					Count: &verbosity,
+				},
 			},
-			// TODO allow for -v and -vv flags and quiet flag
 			//&cli.BoolFlag{
 			//	Name:  "move",
 			//	Usage: "Move files instead of copying",
@@ -249,7 +253,7 @@ func main() {
 			destDir := cmd.StringArg("destDir")
 
 			if srcDir == "" {
-				return fmt.Errorf("source directory is required")
+				return cli.Exit("Source directory is required", 1)
 			}
 
 			var fileProcessor = DryRunFileProcessor
@@ -260,7 +264,6 @@ func main() {
 			}
 
 			outputWriter := &OutputWriter{Quiet}
-			verbosity := cmd.Int("verbosity")
 			if Verbosity(verbosity) == Verbose {
 				outputWriter.Verbosity = Verbose
 			} else if Verbosity(verbosity) >= Debug {
@@ -295,7 +298,7 @@ func main() {
 	}
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		fmt.Fprint(os.Stderr, err.Error())
 		os.Exit(1)
 	}
 }
