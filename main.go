@@ -232,14 +232,15 @@ func main() {
 					Count: &verbosity,
 				},
 			},
-			//&cli.BoolFlag{
-			//	Name:  "move",
-			//	Usage: "Move files instead of copying",
-			//},
-			//&cli.BoolFlag{
-			//	Name:  "dry-run",
-			//	Usage: "Do not move/copy files, just print the new file names",
-			//},
+			&cli.BoolFlag{
+				Name:  "move",
+				Usage: "Move files instead of copying",
+			},
+			&cli.BoolFlag{
+				Name:    "dry-run",
+				Aliases: []string{"d"},
+				Usage:   "Do not move/copy files, just print the new file names",
+			},
 			// TODO add flag for template and/or template file
 		},
 		Arguments: []cli.Argument{
@@ -259,13 +260,6 @@ func main() {
 				return cli.Exit("Source directory is required", 1)
 			}
 
-			var fileProcessor = DryRunFileProcessor
-			var overrideChecker OverrideChecker = &NoOverrideChecker{}
-
-			if cmd.Bool("override") {
-				overrideChecker = &MemoryOverrideChecker{SeenFiles: make(map[string]struct{})}
-			}
-
 			outputWriter := &OutputWriter{Quiet}
 			if Verbosity(verbosity) == Verbose {
 				outputWriter.Verbosity = Verbose
@@ -273,14 +267,21 @@ func main() {
 				outputWriter.Verbosity = Debug
 			}
 
-			// TODO re-enable when the new architecture works
-			// if !ctx.Bool("dry-run") {
-			// 	if ctx.Bool("move") {
-			// 		fileProcessors = append(fileProcessors, &MoveProcessor{overrideChecker: overrideChecker})
-			// 	} else {
-			// 		fileProcessors = append(fileProcessors, &CopyProcessor{overrideChecker: overrideChecker})
-			// 	}
-			// }
+			var fileProcessor = CopyFile
+			if cmd.Bool("move") {
+				if cmd.Bool("dry-run") {
+					outputWriter.Warn("Dry run mode is not compatible with move operation, no files will be moved")
+				}
+				fileProcessor = MoveFile
+			}
+			if cmd.Bool("dry-run") {
+				fileProcessor = DryRunFileProcessor
+			}
+
+			var overrideChecker OverrideChecker = &NoOverrideChecker{}
+			if cmd.Bool("override") {
+				overrideChecker = &MemoryOverrideChecker{SeenFiles: make(map[string]struct{})}
+			}
 
 			pathTemplate, err := template.New("path").Parse(defaultPathTemplate)
 			if err != nil {
