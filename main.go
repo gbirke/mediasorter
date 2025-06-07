@@ -15,7 +15,7 @@ import (
 )
 
 // TODO read template from file, explain purpose of whitespace trimming (allows for complex templates with logic)
-var defaultPathTemplate = "{{- .Artist -}}/{{- .Album -}}/{{- .Title -}}"
+var defaultPathTemplate = "{{- or .AlbumArtist .Artist -}}/{{- .Album -}}/{{- .Title -}}"
 
 type OverrideChecker interface {
 	DestinationFileExists(destPath string) bool

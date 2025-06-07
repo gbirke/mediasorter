@@ -17,13 +17,14 @@ type FileGroup struct {
 }
 
 type Metadata struct {
-	Title    string
-	Artist   string
-	Album    string
-	Format   tag.Format
-	FileType tag.FileType
-	Genre    string
-	Year     int
+	Title       string
+	Artist      string
+	AlbumArtist string
+	Album       string
+	Format      tag.Format
+	FileType    tag.FileType
+	Genre       string
+	Year        int
 
 	Track int
 	Disc  int
@@ -33,15 +34,16 @@ type Metadata struct {
 // In Go, we use forward slashes on all architectures, no need to worry about OS-specific path separators.
 func (m *Metadata) CleanForPaths() *Metadata {
 	return &Metadata{
-		Title:    strings.ReplaceAll(m.Title, "/", ""),
-		Artist:   strings.ReplaceAll(m.Artist, "/", ""),
-		Album:    strings.ReplaceAll(m.Album, "/", ""),
-		Format:   m.Format,
-		FileType: m.FileType,
-		Genre:    strings.ReplaceAll(m.Genre, "/", ""),
-		Year:     m.Year,
-		Track:    m.Track,
-		Disc:     m.Disc,
+		Title:       strings.ReplaceAll(m.Title, "/", ""),
+		Artist:      strings.ReplaceAll(m.Artist, "/", ""),
+		AlbumArtist: strings.ReplaceAll(m.AlbumArtist, "/", ""),
+		Album:       strings.ReplaceAll(m.Album, "/", ""),
+		Format:      m.Format,
+		FileType:    m.FileType,
+		Genre:       strings.ReplaceAll(m.Genre, "/", ""),
+		Year:        m.Year,
+		Track:       m.Track,
+		Disc:        m.Disc,
 	}
 }
 
@@ -77,15 +79,16 @@ func (m *MetaDataReader) ReadMetadata(srcPath MediaFile) (*Metadata, error) {
 	disc, _ := rawMetadata.Disc()
 
 	metadata := &Metadata{
-		Title:    rawMetadata.Title(),
-		Artist:   rawMetadata.Artist(),
-		Album:    rawMetadata.Album(),
-		Format:   rawMetadata.Format(),
-		FileType: rawMetadata.FileType(),
-		Genre:    rawMetadata.Genre(),
-		Year:     rawMetadata.Year(),
-		Track:    track,
-		Disc:     disc,
+		Title:       rawMetadata.Title(),
+		Artist:      rawMetadata.Artist(),
+		AlbumArtist: rawMetadata.AlbumArtist(),
+		Album:       rawMetadata.Album(),
+		Format:      rawMetadata.Format(),
+		FileType:    rawMetadata.FileType(),
+		Genre:       rawMetadata.Genre(),
+		Year:        rawMetadata.Year(),
+		Track:       track,
+		Disc:        disc,
 	}
 
 	m.OutputWriter.Debug(fmt.Sprintf("Created Metadata: %v", metadata))
