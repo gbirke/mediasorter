@@ -5,4 +5,4 @@ metadata and a path template.
 
 ## Usage
 
-    go run main.go srcPath destPath
+    go run . srcPath destPath
