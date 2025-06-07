@@ -8,8 +8,11 @@ import (
 	"github.com/dhowden/tag"
 )
 
+// A path to a media file that was verified by the tag library to be an actual media file
+type MediaFile string
+
 type FileGroup struct {
-	MediaFile    string
+	MediaFile    MediaFile
 	SidecarFiles []string
 }
 
@@ -54,20 +57,13 @@ func (m *NotAMediaFileError) Error() string {
 	return fmt.Sprintf("'%s' is probably not a media file than can be parsed", m.srcPath)
 }
 
-func (m *MetaDataReader) ReadMetadata(srcPath string) (*Metadata, error) {
+func (m *MetaDataReader) ReadMetadata(srcPath MediaFile) (*Metadata, error) {
 	// read metadata from file
-	f, err := os.Open(srcPath)
+	f, err := os.Open(string(srcPath))
 	if err != nil {
 		return nil, fmt.Errorf("error opening file %s: %v", srcPath, err)
 	}
 	defer f.Close()
-
-	// Try to identify the file type, to avoid seek errors in tag.ReadFrom
-	// The files might not be audio files but other metadata files or images
-	_, _, err = tag.Identify(f)
-	if err != nil {
-		return nil, &NotAMediaFileError{srcPath}
-	}
 
 	// Use github.com/dhowden/tag for reading audio metadata
 	rawMetadata, err := tag.ReadFrom(f)
@@ -103,7 +99,7 @@ func (m *MetaDataReader) GetFileGroup(fileCandidates []string) (*FileGroup, erro
 	}
 
 	// Find the media file in the group
-	var mediaFile string
+	var mediaFile MediaFile
 	var sidecarFiles []string
 
 	for _, file := range fileCandidates {
@@ -114,12 +110,16 @@ func (m *MetaDataReader) GetFileGroup(fileCandidates []string) (*FileGroup, erro
 		}
 		defer f.Close()
 
+		// Try to identify the file using the tag library
+		// We ignore the format and filetype (they'll later be read by "ReadMetadata" anyway)
+		// and are only interested in the error. If it is not nil, it means the tag library could
+		// could not identify the file as a media file.
 		_, _, err = tag.Identify(f)
 
 		if err == nil {
 			// This is a media file
 			if mediaFile == "" {
-				mediaFile = file
+				mediaFile = MediaFile(file)
 			} else {
 				// Multiple media files with same basename - treat others as sidecars
 				sidecarFiles = append(sidecarFiles, file)

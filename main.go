@@ -110,7 +110,6 @@ func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
 		re, ok := err.(*NotAMediaFileError)
 		if ok {
 			m.OutputWriter.Info(re.Error())
-			// TODO return result with error msg (skipped) instead of printing, leaving the printing to the output
 			return nil
 		}
 		return err
@@ -124,7 +123,7 @@ func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
 	pathStr := cleanPath(pathBuffer.String())
 
 	// Process the main media file
-	mediaExt := filepath.Ext(group.MediaFile)
+	mediaExt := filepath.Ext(string(group.MediaFile))
 	destPath := filepath.Join(m.DestDir, pathStr+mediaExt)
 
 	m.OutputWriter.Info(fmt.Sprintf("Processing file %s -> %s", group.MediaFile, destPath))
@@ -134,7 +133,7 @@ func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
 		return nil
 	}
 
-	err = m.FileProcessor(group.MediaFile, destPath)
+	err = m.FileProcessor(string(group.MediaFile), destPath)
 	if err != nil {
 		return err
 	}
