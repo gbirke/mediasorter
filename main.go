@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,13 +28,6 @@ func (n *NoOverrideChecker) DestinationFileExists(destPath string) bool {
 	return false
 }
 
-type FilesystemOverrideChecker struct{}
-
-func (f *FilesystemOverrideChecker) DestinationFileExists(destPath string) bool {
-	_, err := os.Stat(destPath)
-	return err == nil
-}
-
 type MemoryOverrideChecker struct {
 	SeenFiles map[string]struct{}
 }
@@ -48,19 +40,6 @@ func (m *MemoryOverrideChecker) DestinationFileExists(destPath string) bool {
 	return false
 }
 
-type ChainingOverrideChecker struct {
-	overrideCheckers []OverrideChecker
-}
-
-func (c *ChainingOverrideChecker) DestinationFileExists(destPath string) bool {
-	for _, checker := range c.overrideCheckers {
-		if checker.DestinationFileExists(destPath) {
-			return true
-		}
-	}
-	return false
-}
-
 type FileExistsError struct {
 	srcPath  string
 	destPath string
@@ -70,31 +49,13 @@ func (err *FileExistsError) Error() string {
 	return fmt.Sprintf("File %s already exists, skipping %s\n", err.destPath, err.srcPath)
 }
 
-type FileProcessor interface {
-	ProcessFile(srcPath string, destPath string) error
-}
+type FileProcessor func(srcPath string, destPath string) error
 
-type OutputProcessor struct {
-	overrideChecker OverrideChecker
-}
-
-func (o *OutputProcessor) ProcessFile(srcPath string, destPath string) error {
-	if o.overrideChecker.DestinationFileExists(destPath) {
-		return &FileExistsError{destPath, srcPath}
-	}
-	fmt.Printf("Processing file %s -> %s\n", srcPath, destPath)
+func DryRunFileProcessor(srcPath string, destPath string) error {
 	return nil
 }
 
-type CopyProcessor struct {
-	overrideChecker OverrideChecker
-}
-
-func (c *CopyProcessor) ProcessFile(srcPath string, destPath string) error {
-	if c.overrideChecker.DestinationFileExists(destPath) {
-		return &FileExistsError{destPath, srcPath}
-	}
-
+func CopyFile(srcPath string, destPath string) error {
 	// create destination directory if it does not exist
 	err := os.MkdirAll(filepath.Dir(destPath), 0755)
 	if err != nil {
@@ -118,15 +79,7 @@ func (c *CopyProcessor) ProcessFile(srcPath string, destPath string) error {
 	return nil
 }
 
-type MoveProcessor struct {
-	overrideChecker OverrideChecker
-}
-
-func (m *MoveProcessor) ProcessFile(srcPath string, destPath string) error {
-	if m.overrideChecker.DestinationFileExists(destPath) {
-		return &FileExistsError{destPath, srcPath}
-	}
-
+func MoveFile(srcPath string, destPath string) error {
 	// create destination directory if it does not exist
 	err := os.MkdirAll(filepath.Dir(destPath), 0755)
 	if err != nil {
@@ -142,10 +95,12 @@ func (m *MoveProcessor) ProcessFile(srcPath string, destPath string) error {
 }
 
 type MediaSorter struct {
-	DestDir        string
-	PathTemplate   *template.Template
-	MetadataReader *MetaDataReader
-	FileProcessors []FileProcessor
+	DestDir         string
+	PathTemplate    *template.Template
+	MetadataReader  *MetaDataReader
+	FileProcessor   FileProcessor
+	OverrideChecker OverrideChecker
+	OutputWriter    *OutputWriter
 }
 
 func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
@@ -154,7 +109,7 @@ func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
 	if err != nil {
 		re, ok := err.(*NotAMediaFileError)
 		if ok {
-			fmt.Println(re.Error())
+			m.OutputWriter.Info(re.Error())
 			// TODO return result with error msg (skipped) instead of printing, leaving the printing to the output
 			return nil
 		}
@@ -173,11 +128,16 @@ func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
 	mediaExt := filepath.Ext(group.MediaFile)
 	destPath := filepath.Join(m.DestDir, pathStr.String()+mediaExt)
 
-	for _, processor := range m.FileProcessors {
-		err := processor.ProcessFile(group.MediaFile, destPath)
-		if err != nil {
-			return err
-		}
+	m.OutputWriter.Info(fmt.Sprintf("Processing file %s -> %s", group.MediaFile, destPath))
+
+	if m.OverrideChecker.DestinationFileExists(destPath) {
+		m.OutputWriter.Warn(fmt.Sprintf("File %s already exists, skipping %s", destPath, group.MediaFile))
+		return nil
+	}
+
+	err = m.FileProcessor(group.MediaFile, destPath)
+	if err != nil {
+		return err
 	}
 
 	// Process sidecar files
@@ -185,18 +145,15 @@ func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
 		sidecarExt := filepath.Ext(sidecarFile)
 		sidecarDestPath := filepath.Join(m.DestDir, pathStr.String()+sidecarExt)
 
-		for _, processor := range m.FileProcessors {
-			err := processor.ProcessFile(sidecarFile, sidecarDestPath)
-			if err != nil {
-				return err
-			}
+		err := m.FileProcessor(sidecarFile, sidecarDestPath)
+		if err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
-// TODO use custom output class instead of fmt.Printf to implement verbosity and colors
 func (m *MediaSorter) Sort(srcDir string) error {
 	// First pass: collect all files and group by basename
 	fileGroups := make(map[string][]string)
@@ -228,22 +185,22 @@ func (m *MediaSorter) Sort(srcDir string) error {
 		group, err := m.MetadataReader.GetFileGroup(files)
 
 		if err != nil {
-			fmt.Printf("No media file found for basename %s, skipping group\n", filepath.Base(files[0]))
+			m.OutputWriter.Warn(fmt.Sprintf("No media file found for basename %s, skipping group", filepath.Base(files[0])))
 			continue
 		}
 
 		err = m.ProcessFileGroup(group)
 
 		if err == tag.ErrNoTagsFound {
-			fmt.Printf("No tags found in file %s, skipping\n", group.MediaFile)
+			m.OutputWriter.Warn(fmt.Sprintf("No tags found in file %s, skipping", group.MediaFile))
 			continue
 		}
 
 		switch err.(type) {
 		case *FileExistsError:
-			fmt.Print(err.Error())
+			m.OutputWriter.Warn(err.Error())
 		case *NotAMediaFileError:
-			fmt.Print(err.Error())
+			m.OutputWriter.Warn(err.Error())
 		case nil:
 			// Success, continue
 		default:
@@ -257,11 +214,11 @@ func (m *MediaSorter) Sort(srcDir string) error {
 func main() {
 	// Define command line flags
 	override := flag.Bool("override", false, "Override existing files")
+	// TODO allow for -v and -vv flags and quiet flag
+	verbosity := flag.Int("verbosity", 1, "Verbosity level: 0=quiet, 1=verbose, 2=debug")
 	//move := flag.Bool("move", false, "Move files instead of copying")
 	//dryRun := flag.Bool("dry-run", false, "Do not move/copy files, just print the new file names")
 	// TODO add flag for template and/or template file
-	// TODO add flag for verbosity and help
-	// TODO add flag for progress bar (mutually exclusive with verbosity)
 
 	flag.Parse()
 	args := flag.Args()
@@ -274,14 +231,19 @@ func main() {
 	srcDir := args[0]
 	destDir := args[1]
 
-	var fileProcessors []FileProcessor
+	var fileProcessor = DryRunFileProcessor
 	var overrideChecker OverrideChecker = &NoOverrideChecker{}
 
 	if *override {
-		overrideChecker = &FilesystemOverrideChecker{}
+		overrideChecker = &MemoryOverrideChecker{}
 	}
 
-	fileProcessors = append(fileProcessors, &OutputProcessor{overrideChecker: overrideChecker})
+	var outputWriter *OutputWriter = &OutputWriter{Quiet}
+	if Verbosity(*verbosity) == Verbose {
+		outputWriter.Verbosity = Verbose
+	} else if Verbosity(*verbosity) >= Debug {
+		outputWriter.Verbosity = Debug
+	}
 
 	// TODO re-enable when the new architecture works
 	// if !*dryRun {
@@ -299,15 +261,17 @@ func main() {
 	// TODO add custom functions for normalizing names - underscores instead of spaces, transform unicode, etc
 
 	mediaSorter := &MediaSorter{
-		DestDir:        destDir,
-		PathTemplate:   pathTemplate,
-		FileProcessors: fileProcessors,
-		MetadataReader: &MetaDataReader{slog.Default()},
+		DestDir:         destDir,
+		PathTemplate:    pathTemplate,
+		FileProcessor:   fileProcessor,
+		MetadataReader:  &MetaDataReader{outputWriter},
+		OverrideChecker: overrideChecker,
+		OutputWriter:    outputWriter,
 	}
 	err = mediaSorter.Sort(srcDir)
 
 	if err != nil {
-		fmt.Println("Error:", err)
+		fmt.Fprintf(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
 }

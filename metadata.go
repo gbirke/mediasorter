@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 
 	"github.com/dhowden/tag"
@@ -27,7 +26,7 @@ type Metadata struct {
 }
 
 type MetaDataReader struct {
-	logger *slog.Logger
+	OutputWriter *OutputWriter
 }
 
 type NotAMediaFileError struct {
@@ -59,7 +58,7 @@ func (m *MetaDataReader) ReadMetadata(srcPath string) (*Metadata, error) {
 		return nil, err
 	}
 
-	m.logger.Debug("Metadata for file", "file", srcPath, "rawMetadata", slog.AnyValue(rawMetadata))
+	m.OutputWriter.Debug(fmt.Sprintf("Metadata for file %s - %v", srcPath, rawMetadata))
 
 	track, _ := rawMetadata.Track()
 	disc, _ := rawMetadata.Disc()
@@ -77,7 +76,7 @@ func (m *MetaDataReader) ReadMetadata(srcPath string) (*Metadata, error) {
 		Disc:     disc,
 	}
 
-	m.logger.Debug("Read Metadata", "metadata", slog.AnyValue(metadata))
+	m.OutputWriter.Debug(fmt.Sprintf("Created Metadata: %v", metadata))
 	return metadata, nil
 }
 
