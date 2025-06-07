@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 
@@ -14,7 +15,6 @@ import (
 )
 
 // TODO read template from file, explain purpose of whitespace trimming (allows for complex templates with logic)
-// var defaultPathTemplate = "{{- .Artist -}}/{{- .Album -}}/{{- .Track -}} {{- .Title -}}.{{- .Ext -}}"
 var defaultPathTemplate = "{{- .Artist -}}/{{- .Album -}}/{{- .Title -}}"
 
 type OverrideChecker interface {
@@ -116,17 +116,20 @@ func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
 		return err
 	}
 
-	var pathStr bytes.Buffer
-	if err := m.PathTemplate.Execute(&pathStr, metadata); err != nil {
+	var pathBuffer bytes.Buffer
+	if err := m.PathTemplate.Execute(&pathBuffer, metadata); err != nil {
 		return fmt.Errorf("error executing template: %v", err)
 	}
-	// TODO remove newlines and tabs from pathStr in case the template is "bad"
+	// remove newlines and tabs from pathStr in case the template is "bad"
+	var pathStr = pathBuffer.String()
+	spacePattern := regexp.MustCompile(`\s*[\t\r\n]`)
+	pathStr = spacePattern.ReplaceAllString(pathStr, " ")
 
-	// TODO check for path traversal attacks and skip if detected
+	// TODO check for path traversal attacks and skip if detected? Not sure if path traversal is a bug or feature
 
 	// Process the main media file
 	mediaExt := filepath.Ext(group.MediaFile)
-	destPath := filepath.Join(m.DestDir, pathStr.String()+mediaExt)
+	destPath := filepath.Join(m.DestDir, pathStr+mediaExt)
 
 	m.OutputWriter.Info(fmt.Sprintf("Processing file %s -> %s", group.MediaFile, destPath))
 
@@ -143,7 +146,7 @@ func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
 	// Process sidecar files
 	for _, sidecarFile := range group.SidecarFiles {
 		sidecarExt := filepath.Ext(sidecarFile)
-		sidecarDestPath := filepath.Join(m.DestDir, pathStr.String()+sidecarExt)
+		sidecarDestPath := filepath.Join(m.DestDir, pathStr+sidecarExt)
 
 		err := m.FileProcessor(sidecarFile, sidecarDestPath)
 		if err != nil {
