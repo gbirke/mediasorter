@@ -55,9 +55,9 @@ func DryRunFileProcessor(srcPath string, destPath string) error {
 	return nil
 }
 
-func CopyFile(srcPath string, destPath string) error {
+func CopyFile(srcPath string, destPath string) (err error) {
 	// create destination directory if it does not exist
-	err := os.MkdirAll(filepath.Dir(destPath), 0755)
+	err = os.MkdirAll(filepath.Dir(destPath), 0755)
 	if err != nil {
 		return fmt.Errorf("error creating directory %s: %v", filepath.Dir(destPath), err)
 	}
@@ -66,7 +66,11 @@ func CopyFile(srcPath string, destPath string) error {
 	if err != nil {
 		return fmt.Errorf("error creating file %s: %v", destPath, err)
 	}
-	defer destFile.Close()
+	defer func() {
+		if closeErr := destFile.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("error closing file %s: %v", destPath, closeErr)
+		}
+	}()
 	f, err := os.Open(srcPath)
 	if err != nil {
 		return fmt.Errorf("error opening file %s: %v", srcPath, err)
@@ -79,9 +83,9 @@ func CopyFile(srcPath string, destPath string) error {
 	return nil
 }
 
-func MoveFile(srcPath string, destPath string) error {
+func MoveFile(srcPath string, destPath string) (err error) {
 	// create destination directory if it does not exist
-	err := os.MkdirAll(filepath.Dir(destPath), 0755)
+	err = os.MkdirAll(filepath.Dir(destPath), 0755)
 	if err != nil {
 		return fmt.Errorf("error creating directory %s: %v", filepath.Dir(destPath), err)
 	}
