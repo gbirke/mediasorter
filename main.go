@@ -17,6 +17,9 @@ import (
 // TODO read template from file, explain purpose of whitespace trimming (allows for complex templates with logic)
 var defaultPathTemplate = "{{- .Artist -}}/{{- .Album -}}/{{- .Title -}}"
 
+// Cleanup for file names generated from templates, in case someone forgets the dashes around placeholders
+var spacePattern = regexp.MustCompile(`\s*[\t\r\n]`)
+
 type OverrideChecker interface {
 	DestinationFileExists(destPath string) bool
 }
@@ -122,7 +125,6 @@ func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
 	}
 	// remove newlines and tabs from pathStr in case the template is "bad"
 	var pathStr = pathBuffer.String()
-	spacePattern := regexp.MustCompile(`\s*[\t\r\n]`)
 	pathStr = spacePattern.ReplaceAllString(pathStr, " ")
 
 	// TODO check for path traversal attacks and skip if detected? Not sure if path traversal is a bug or feature
