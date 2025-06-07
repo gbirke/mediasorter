@@ -4,3 +4,6 @@ schema = 3
   [mod."github.com/dhowden/tag"]
     version = "v0.0.0-20240417053706-3d75831295e8"
     hash = "sha256-eYCGgoH4z5kf+UjItqlcQrqnq4RkxdL9E+PmmVBCLQ4="
+  [mod."github.com/urfave/cli/v3"]
+    version = "v3.3.3"
+    hash = "sha256-FdPiu7koY1qBinkfca4A05zCrX+Vu4eRz8wlRDZJyGg="
