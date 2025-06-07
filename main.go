@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"text/template"
 
@@ -16,17 +15,6 @@ import (
 
 // TODO read template from file, explain purpose of whitespace trimming (allows for complex templates with logic)
 var defaultPathTemplate = "{{- .Artist -}}/{{- .Album -}}/{{- .Title -}}"
-
-// Cleanup for file and directory names generated from templates
-var spacePattern = regexp.MustCompile(`[_\t\r\n]+`)
-
-var multispacePattern = regexp.MustCompile(`\s+`)
-
-var forbiddenCharPattern = regexp.MustCompile(`[<>:"'/\\|?*\x00-\x1F]`)
-
-var trimPathPattern = regexp.MustCompile(`^[. ]+|[-. ]+$`)
-
-var bracketPattern = regexp.MustCompile(`[\[\](){}]`)
 
 type OverrideChecker interface {
 	DestinationFileExists(destPath string) bool
@@ -103,52 +91,6 @@ func MoveFile(srcPath string, destPath string) error {
 	}
 
 	return nil
-}
-
-func cleanPathSegment(pathSegment string) string {
-	// Normalize Unicode (optional: requires a Unicode normalization lib)
-	// Remove characters not safe for filenames
-	// Keep letters, digits, some punctuation, spaces, dashes and underscores
-	cleaned := forbiddenCharPattern.ReplaceAllString(pathSegment, "_")
-
-	// Replace "special notifiers" in brackets like "(Explicit)" with safer delimiters
-	cleaned = bracketPattern.ReplaceAllString(cleaned, " - ")
-
-	// Shell-awkward characters
-	cleaned = strings.ReplaceAll(cleaned, "`", "")    // Remove backticks
-	cleaned = strings.ReplaceAll(cleaned, "&", "and") // Replace ampersand
-	cleaned = strings.ReplaceAll(cleaned, "#", "No")  // Replace hash
-
-	// Collapse multiple underscores/spaces
-	cleaned = spacePattern.ReplaceAllString(cleaned, " ")
-	cleaned = multispacePattern.ReplaceAllString(cleaned, " ")
-
-	// Trim leading/trailing spaces and dots
-	// Trimming leading dots avoids hidden file and path traversal
-	// Trimming trailing dots avoids weird-looking file names
-	cleaned = trimPathPattern.ReplaceAllString(cleaned, "")
-
-	// Max 255 characters per segment
-	if len(cleaned) > 255 {
-		cleaned = cleaned[:255]
-	}
-
-	return cleaned
-}
-
-func cleanPath(path string) string {
-	segments := strings.Split(path, "/")
-	for i, segment := range segments {
-		segments[i] = cleanPathSegment(segment)
-	}
-
-	// Avoid absolute paths, paths must always be relative
-	if segments[0] == "" {
-		segments[0] = "_"
-	}
-
-	cleanedPath := strings.Join(segments, "/")
-	return cleanedPath
 }
 
 type MediaSorter struct {
@@ -294,7 +236,7 @@ func main() {
 		overrideChecker = &MemoryOverrideChecker{}
 	}
 
-	var outputWriter *OutputWriter = &OutputWriter{Quiet}
+	outputWriter := &OutputWriter{Quiet}
 	if Verbosity(*verbosity) == Verbose {
 		outputWriter.Verbosity = Verbose
 	} else if Verbosity(*verbosity) >= Debug {
@@ -327,7 +269,7 @@ func main() {
 	err = mediaSorter.Sort(srcDir)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error:", err)
+		fmt.Fprintf(os.Stderr, "Error: %s", err)
 		os.Exit(1)
 	}
 }
