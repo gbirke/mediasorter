@@ -14,8 +14,15 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// TODO read template from file, explain purpose of whitespace trimming (allows for complex templates with logic)
-var defaultPathTemplate = "{{- or .AlbumArtist .Artist -}}/{{- .Album -}}/{{- .Title -}}"
+// TODO read template from file, explain whitespace trimming and placeholders in README
+var defaultPathTemplate = `
+	{{- or .AlbumArtist .Artist -}}
+	{{- pathSep -}}
+	{{- .Album -}}
+	{{- pathSep -}}
+	{{- if .Track }}{{ printf "%02d" .Track }}. {{ end -}}
+	{{- .Title -}}
+`
 
 type OverrideChecker interface {
 	DestinationFileExists(destPath string) bool
@@ -242,6 +249,7 @@ func main() {
 				Usage:   "Do not move/copy files, just print the new file names",
 			},
 			// TODO add flag for template and/or template file
+			// TODO add flag for testing with a single file (automatic dry run)
 		},
 		Arguments: []cli.Argument{
 			&cli.StringArg{
@@ -283,11 +291,18 @@ func main() {
 				overrideChecker = &MemoryOverrideChecker{SeenFiles: make(map[string]struct{})}
 			}
 
-			pathTemplate, err := template.New("path").Parse(defaultPathTemplate)
+			pathTemplate, err := template.New("path").Funcs(template.FuncMap{
+				// Path separator function to make the separator more visible in templates than a simple "/"
+				"pathSep": func() string { return "/" },
+				// TODO add custom functions for normalizing names - underscores instead of spaces, transform unicode, replace qualifiers in brackets, etc
+			}).Parse(defaultPathTemplate)
 			if err != nil {
 				return fmt.Errorf("error parsing template: %v", err)
 			}
-			// TODO add custom functions for normalizing names - underscores instead of spaces, transform unicode, etc
+			// Check if template is valid by executing it with a dummy Metadata struct
+			if err := pathTemplate.Execute(io.Discard, &Metadata{}); err != nil {
+				return fmt.Errorf("error executing template: %v", err)
+			}
 
 			mediaSorter := &MediaSorter{
 				DestDir:         destDir,
