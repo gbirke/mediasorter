@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"flag"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +11,7 @@ import (
 	"text/template"
 
 	"github.com/dhowden/tag"
+	"github.com/urfave/cli/v3"
 )
 
 // TODO read template from file, explain purpose of whitespace trimming (allows for complex templates with logic)
@@ -210,66 +211,91 @@ func (m *MediaSorter) Sort(srcDir string) error {
 }
 
 func main() {
-	// Define command line flags
-	override := flag.Bool("override", false, "Override existing files")
-	// TODO allow for -v and -vv flags and quiet flag
-	verbosity := flag.Int("verbosity", 1, "Verbosity level: 0=quiet, 1=verbose, 2=debug")
-	//move := flag.Bool("move", false, "Move files instead of copying")
-	//dryRun := flag.Bool("dry-run", false, "Do not move/copy files, just print the new file names")
-	// TODO add flag for template and/or template file
+	app := &cli.Command{
+		Name:  "media-sorter",
+		Usage: "Move media files into subdirectories, based on their metadata and a path template",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "override",
+				Usage: "Override existing files",
+			},
+			&cli.IntFlag{
+				Name:  "verbosity",
+				Value: 1,
+				Usage: "Verbosity level: 0=quiet, 1=verbose, 2=debug",
+			},
+			// TODO allow for -v and -vv flags and quiet flag
+			//&cli.BoolFlag{
+			//	Name:  "move",
+			//	Usage: "Move files instead of copying",
+			//},
+			//&cli.BoolFlag{
+			//	Name:  "dry-run",
+			//	Usage: "Do not move/copy files, just print the new file names",
+			//},
+			// TODO add flag for template and/or template file
+		},
+		Arguments: []cli.Argument{
+			&cli.StringArg{
+				Name: "srcDir",
+			},
+			&cli.StringArg{
+				Name: "destDir",
+			},
+		},
+		ArgsUsage: "<source directory> [destination directory]",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			srcDir := cmd.StringArg("srcDir")
+			destDir := cmd.StringArg("destDir")
 
-	flag.Parse()
-	args := flag.Args()
-	// TODO make destDir optional, path can also bet set in template
-	if len(args) < 2 {
-		// TODO add required arguments when printing usage
-		flag.Usage()
-		return
+			if srcDir == "" {
+				return fmt.Errorf("source directory is required")
+			}
+
+			var fileProcessor = DryRunFileProcessor
+			var overrideChecker OverrideChecker = &NoOverrideChecker{}
+
+			if cmd.Bool("override") {
+				overrideChecker = &MemoryOverrideChecker{SeenFiles: make(map[string]struct{})}
+			}
+
+			outputWriter := &OutputWriter{Quiet}
+			verbosity := cmd.Int("verbosity")
+			if Verbosity(verbosity) == Verbose {
+				outputWriter.Verbosity = Verbose
+			} else if Verbosity(verbosity) >= Debug {
+				outputWriter.Verbosity = Debug
+			}
+
+			// TODO re-enable when the new architecture works
+			// if !ctx.Bool("dry-run") {
+			// 	if ctx.Bool("move") {
+			// 		fileProcessors = append(fileProcessors, &MoveProcessor{overrideChecker: overrideChecker})
+			// 	} else {
+			// 		fileProcessors = append(fileProcessors, &CopyProcessor{overrideChecker: overrideChecker})
+			// 	}
+			// }
+
+			pathTemplate, err := template.New("path").Parse(defaultPathTemplate)
+			if err != nil {
+				return fmt.Errorf("error parsing template: %v", err)
+			}
+			// TODO add custom functions for normalizing names - underscores instead of spaces, transform unicode, etc
+
+			mediaSorter := &MediaSorter{
+				DestDir:         destDir,
+				PathTemplate:    pathTemplate,
+				FileProcessor:   fileProcessor,
+				MetadataReader:  &MetaDataReader{outputWriter},
+				OverrideChecker: overrideChecker,
+				OutputWriter:    outputWriter,
+			}
+			return mediaSorter.Sort(srcDir)
+		},
 	}
-	srcDir := args[0]
-	destDir := args[1]
 
-	var fileProcessor = DryRunFileProcessor
-	var overrideChecker OverrideChecker = &NoOverrideChecker{}
-
-	if *override {
-		overrideChecker = &MemoryOverrideChecker{}
-	}
-
-	outputWriter := &OutputWriter{Quiet}
-	if Verbosity(*verbosity) == Verbose {
-		outputWriter.Verbosity = Verbose
-	} else if Verbosity(*verbosity) >= Debug {
-		outputWriter.Verbosity = Debug
-	}
-
-	// TODO re-enable when the new architecture works
-	// if !*dryRun {
-	// 	if *move {
-	// 		fileProcessors = append(fileProcessors, &MoveProcessor{overrideChecker: overrideChecker})
-	// 	} else {
-	// 		fileProcessors = append(fileProcessors, &CopyProcessor{overrideChecker: overrideChecker})
-	// 	}
-	// }
-
-	pathTemplate, err := template.New("path").Parse(defaultPathTemplate)
-	if err != nil {
-		panic(fmt.Sprintf("Error parsing template: %v", err))
-	}
-	// TODO add custom functions for normalizing names - underscores instead of spaces, transform unicode, etc
-
-	mediaSorter := &MediaSorter{
-		DestDir:         destDir,
-		PathTemplate:    pathTemplate,
-		FileProcessor:   fileProcessor,
-		MetadataReader:  &MetaDataReader{outputWriter},
-		OverrideChecker: overrideChecker,
-		OutputWriter:    outputWriter,
-	}
-	err = mediaSorter.Sort(srcDir)
-
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s", err)
+	if err := app.Run(context.Background(), os.Args); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		os.Exit(1)
 	}
 }
