@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/dhowden/tag"
 )
@@ -23,6 +24,22 @@ type Metadata struct {
 
 	Track int
 	Disc  int
+}
+
+// CleanForPaths returns a new Metadata instance with fields cleaned for use in file paths.
+// In Go, we use forward slashes on all architectures, no need to worry about OS-specific path separators.
+func (m *Metadata) CleanForPaths() *Metadata {
+	return &Metadata{
+		Title:    strings.ReplaceAll(m.Title, "/", ""),
+		Artist:   strings.ReplaceAll(m.Artist, "/", ""),
+		Album:    strings.ReplaceAll(m.Album, "/", ""),
+		Format:   m.Format,
+		FileType: m.FileType,
+		Genre:    strings.ReplaceAll(m.Genre, "/", ""),
+		Year:     m.Year,
+		Track:    m.Track,
+		Disc:     m.Disc,
+	}
 }
 
 type MetaDataReader struct {
@@ -63,7 +80,6 @@ func (m *MetaDataReader) ReadMetadata(srcPath string) (*Metadata, error) {
 	track, _ := rawMetadata.Track()
 	disc, _ := rawMetadata.Disc()
 
-	// TODO clean up metadata - remove newlines, slashes, colons and tabs, to avoid problems with file names
 	metadata := &Metadata{
 		Title:    rawMetadata.Title(),
 		Artist:   rawMetadata.Artist(),
@@ -82,7 +98,8 @@ func (m *MetaDataReader) ReadMetadata(srcPath string) (*Metadata, error) {
 
 func (m *MetaDataReader) GetFileGroup(fileCandidates []string) (*FileGroup, error) {
 	if len(fileCandidates) == 0 {
-		return nil, fmt.Errorf("No files found in the group, skipping.")
+		// This should not happen, but just in case
+		return nil, fmt.Errorf("no files found in the group, skipping")
 	}
 
 	// Find the media file in the group
@@ -114,7 +131,7 @@ func (m *MetaDataReader) GetFileGroup(fileCandidates []string) (*FileGroup, erro
 	}
 
 	if mediaFile == "" {
-		return nil, fmt.Errorf("No media file found in the group, skipping")
+		return nil, fmt.Errorf("no media file found in the group, skipping")
 	}
 
 	return &FileGroup{
