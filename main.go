@@ -91,47 +91,40 @@ func (m *MetaDataReader) GetFileGroup(fileCandidates []string) (*FileGroup, erro
 		return nil, fmt.Errorf("No files found in the group, skipping.")
 	}
 
-	var bestMediaFile string
-	var bestMetadataCount int
+	// Find the media file in the group
+	var mediaFile string
 	var sidecarFiles []string
 
 	for _, file := range fileCandidates {
-		metadata, err := m.ReadMetadata(file)
+		// Try to identify if this is a media file
+		f, err := os.Open(file)
 		if err != nil {
-			// If it's not a media file or has other errors, treat as sidecar
-			sidecarFiles = append(sidecarFiles, file)
-			continue
+			return nil, fmt.Errorf("error opening file %s: %v", file, err)
 		}
+		defer f.Close()
 
-		// Count non-blank metadata fields
-		metadataCount := 0
-		if metadata.Title != "" { metadataCount++ }
-		if metadata.Artist != "" { metadataCount++ }
-		if metadata.Album != "" { metadataCount++ }
-		if metadata.Genre != "" { metadataCount++ }
-		if metadata.Year != 0 { metadataCount++ }
-		if metadata.Track != 0 { metadataCount++ }
-		if metadata.Disc != 0 { metadataCount++ }
+		_, _, err = tag.Identify(f)
 
-		if bestMediaFile == "" || metadataCount > bestMetadataCount {
-			// If we had a previous best file, move it to sidecars
-			if bestMediaFile != "" {
-				sidecarFiles = append(sidecarFiles, bestMediaFile)
+		if err == nil {
+			// This is a media file
+			if mediaFile == "" {
+				mediaFile = file
+			} else {
+				// Multiple media files with same basename - treat others as sidecars
+				sidecarFiles = append(sidecarFiles, file)
 			}
-			bestMediaFile = file
-			bestMetadataCount = metadataCount
 		} else {
-			// This media file has less metadata, treat as sidecar
+			// This is a sidecar file
 			sidecarFiles = append(sidecarFiles, file)
 		}
 	}
 
-	if bestMediaFile == "" {
+	if mediaFile == "" {
 		return nil, fmt.Errorf("No media file found in the group, skipping")
 	}
 
 	return &FileGroup{
-		MediaFile:    bestMediaFile,
+		MediaFile:    mediaFile,
 		SidecarFiles: sidecarFiles,
 	}, nil
 }
