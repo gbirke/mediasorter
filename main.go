@@ -137,6 +137,10 @@ func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
 	mediaExt := filepath.Ext(string(group.MediaFile))
 	destPath := filepath.Join(m.DestDir, pathStr+mediaExt)
 
+	if string(group.MediaFile) == destPath {
+		return fmt.Errorf("destination path %s is the same as source path, skipping", destPath)
+	}
+
 	m.OutputWriter.Info(fmt.Sprintf("Processing file %s -> %s", group.MediaFile, destPath))
 
 	if m.OverrideChecker.DestinationFileExists(destPath) {
