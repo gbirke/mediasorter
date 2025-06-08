@@ -75,6 +75,8 @@ func (m *MetaDataReader) ReadMetadata(srcPath MediaFile) (*Metadata, error) {
 
 	m.OutputWriter.Debug(fmt.Sprintf("Metadata for file %s - %v", srcPath, rawMetadata))
 
+	// The seconds value is not an error, but the total
+	// TODO: Add to our Metadata struct
 	track, _ := rawMetadata.Track()
 	disc, _ := rawMetadata.Disc()
 
