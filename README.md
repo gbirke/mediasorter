@@ -17,7 +17,7 @@ but with a different suffix), the tool will rename them as well.
 
 ## Future ideas
 
-- Improve verbose output - show when we move sidecar files
-- Configurable templates, configure from config file
+- Configurable templates, configure from config directory
 - Optional Functions in the templates - case change, transliterate Unicode
     chars, etc.
+- Improve verbose output - show when we move sidecar files
