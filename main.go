@@ -126,14 +126,12 @@ func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
 		return err
 	}
 
+	// Generate the destination path and `destPath` for sidecar files, using the template
 	var pathBuffer bytes.Buffer
 	if err := m.PathTemplate.Execute(&pathBuffer, metadata.CleanForPaths()); err != nil {
 		return fmt.Errorf("error executing template: %v", err)
 	}
-	// remove newlines and tabs from pathStr in case the template is "bad"
 	pathStr := cleanPath(pathBuffer.String())
-
-	// Process the main media file
 	mediaExt := filepath.Ext(string(group.MediaFile))
 	destPath := filepath.Join(m.DestDir, pathStr+mediaExt)
 
