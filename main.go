@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,13 +169,13 @@ func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
 func (m *MediaSorter) Sort(srcDir string) error {
 	// First pass: collect all files and group by basename
 	fileGroups := make(map[string][]string)
-
-	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+	// Walk recoursively through the source directory
+	err := filepath.WalkDir(srcDir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		// TODO recursive processing?
+		// We don't do anything with directories, filepath.WalkDir will recursively walk them anyway
 		if info.IsDir() {
 			return nil
 		}
