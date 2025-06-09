@@ -1,0 +1,6 @@
+{{- /* This example template creates a directory for each artist, putting album, track number and track name in one dash-separated file */ -}}
+{{- or .AlbumArtist .Artist -}}
+{{- pathSep -}}
+{{- .Album }} - {{ if .Track }}{{ printf "%02d" .Track }} - {{ end -}}
+{{- .Title -}}
+

@@ -167,9 +167,9 @@ func (m *MediaSorter) ProcessFileGroup(group *FileGroup) error {
 }
 
 func (m *MediaSorter) Sort(srcDir string) error {
-	// First pass: collect all files and group by basename
+	// First pass: collect all files and group by path without suffix
 	fileGroups := make(map[string][]string)
-	// Walk recoursively through the source directory
+	// Walk recursively through the source directory
 	err := filepath.WalkDir(srcDir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -180,8 +180,13 @@ func (m *MediaSorter) Sort(srcDir string) error {
 			return nil
 		}
 
-		// Group files by basename (filename without extension)
-		basename := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		// Skip hidden files on Unix-like systems
+		isHidenOnUnix := strings.HasPrefix(info.Name(), ".")
+		if isHidenOnUnix {
+			return nil
+		}
+
+		basename := strings.TrimSuffix(path, filepath.Ext(path))
 		fileGroups[basename] = append(fileGroups[basename], path)
 
 		return nil
@@ -192,12 +197,19 @@ func (m *MediaSorter) Sort(srcDir string) error {
 	}
 
 	// Second pass: process each group
-	for _, files := range fileGroups {
+	for basename, files := range fileGroups {
 
 		group, err := m.MetadataReader.GetFileGroup(files)
 
 		if err != nil {
-			m.OutputWriter.Warn(fmt.Sprintf("No media file found for basename %s, skipping group", filepath.Base(files[0])))
+			switch len(files) {
+			case 0:
+				m.OutputWriter.Warn(fmt.Sprintf("Strange error: No files found in group '%s'. This should never happen. Please contact program author", basename))
+			case 1:
+				m.OutputWriter.Warn(fmt.Sprintf("%s is not a media file, skipping", files[0]))
+			default:
+				m.OutputWriter.Warn(fmt.Sprintf("No media file found for %d files starting with %s, skipping", len(files), basename))
+			}
 			continue
 		}
 
@@ -227,32 +239,36 @@ func main() {
 	var verbosity int
 	app := &cli.Command{
 		Name:                   "media-sorter",
-		Usage:                  fmt.Sprintf("Copy or move media files into subdirectories, based on their metadata and a path template.\n\nDefault Template: %s", defaultPathTemplate),
+		Usage:                  "Copy or move media files into subdirectories, based on their metadata and a path template.",
 		UseShortOptionHandling: true,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
-				Name:  "override",
-				Usage: "Override existing files",
-			},
-			&cli.BoolFlag{
-				Name:    "verbose",
-				Aliases: []string{"v"},
-				Usage:   "Set verbosity",
-				Config: cli.BoolConfig{
-					Count: &verbosity,
-				},
+				Name:    "dry-run",
+				Aliases: []string{"d"},
+				Usage:   "Do not move/copy files, just print the new file names",
 			},
 			&cli.BoolFlag{
 				Name:  "move",
 				Usage: "Move files instead of copying",
 			},
 			&cli.BoolFlag{
-				Name:    "dry-run",
-				Aliases: []string{"d"},
-				Usage:   "Do not move/copy files, just print the new file names",
+				Name:  "override",
+				Usage: "Override existing files",
 			},
-			// TODO add flag for template and/or template file
-			// TODO add flag for testing with a single file (automatic dry run)
+			&cli.StringFlag{
+				Name:    "template",
+				Aliases: []string{"t"},
+				Usage:   "Path to a Go template for new file names, with placeholders for metadata",
+			},
+
+			&cli.BoolFlag{
+				Name:    "verbose",
+				Aliases: []string{"v"},
+				Usage:   "Display every file action",
+				Config: cli.BoolConfig{
+					Count: &verbosity,
+				},
+			},
 		},
 		Arguments: []cli.Argument{
 			&cli.StringArg{
@@ -287,6 +303,10 @@ func main() {
 			}
 			if cmd.Bool("dry-run") {
 				fileProcessor = DryRunFileProcessor
+				// Dry run mode should always be verbose to show what would happen
+				if Verbosity(verbosity) < Verbose {
+					outputWriter.Verbosity = Verbose
+				}
 			}
 
 			var overrideChecker OverrideChecker = &NoOverrideChecker{}
@@ -294,11 +314,21 @@ func main() {
 				overrideChecker = &MemoryOverrideChecker{SeenFiles: make(map[string]struct{})}
 			}
 
+			var templateStr = defaultPathTemplate
+			if cmd.String("template") != "" {
+				templateFilePath := cmd.String("template")
+				templateFileContents, err := os.ReadFile(templateFilePath)
+				if err != nil {
+					return fmt.Errorf("error reading template file %s: %v", templateFilePath, err)
+				}
+				templateStr = string(templateFileContents)
+			}
+
 			pathTemplate, err := template.New("path").Funcs(template.FuncMap{
 				// Path separator function to make the separator more visible in templates than a simple "/"
 				"pathSep": func() string { return "/" },
 				// TODO add custom functions for normalizing names - underscores instead of spaces, transform unicode, replace qualifiers in brackets, etc
-			}).Parse(defaultPathTemplate)
+			}).Parse(templateStr)
 			if err != nil {
 				return fmt.Errorf("error parsing template: %v", err)
 			}
@@ -315,6 +345,9 @@ func main() {
 				OverrideChecker: overrideChecker,
 				OutputWriter:    outputWriter,
 			}
+
+			// TODO check if srcDir is a file and create manual MediaFile if it's not a directory. Then call ProcessFileGroup
+
 			return mediaSorter.Sort(srcDir)
 		},
 	}
