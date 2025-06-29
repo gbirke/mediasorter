@@ -3,5 +3,8 @@
 result
 .direnv/
 
-# Agnore artifacts from the bullshit machine
+# Ignore artifacts from the bullshit machine
 .aider*
+
+# Ignore output files (e.g. coverage reports)
+*.out

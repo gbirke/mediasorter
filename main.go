@@ -326,8 +326,13 @@ func main() {
 
 			pathTemplate, err := template.New("path").Funcs(template.FuncMap{
 				// Path separator function to make the separator more visible in templates than a simple "/"
-				"pathSep": func() string { return "/" },
-				// TODO add custom functions for normalizing names - underscores instead of spaces, transform unicode, replace qualifiers in brackets, etc
+				"pathSep":           func() string { return "/" },
+				"replaceInBrackets": ReplaceInBrackets,
+				"removeBrackets":    RemoveBrackets,
+				// TODO add more custom functions for normalizing names:
+				// - underscores instead of spaces
+				// - transform unicode
+				// - etc
 			}).Parse(templateStr)
 			if err != nil {
 				return fmt.Errorf("error parsing template: %v", err)
