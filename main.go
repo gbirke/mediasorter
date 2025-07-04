@@ -248,8 +248,9 @@ func main() {
 				Usage:   "Do not move/copy files, just print the new file names",
 			},
 			&cli.BoolFlag{
-				Name:  "move",
-				Usage: "Move files instead of copying",
+				Name:    "move",
+				Aliases: []string{"m"},
+				Usage:   "Move files instead of copying",
 			},
 			&cli.BoolFlag{
 				Name:  "override",
@@ -284,6 +285,7 @@ func main() {
 			destDir := cmd.StringArg("destDir")
 
 			if srcDir == "" {
+				// TODO show usage here, after the error message
 				return cli.Exit("Source directory is required", 1)
 			}
 
@@ -342,18 +344,32 @@ func main() {
 				return fmt.Errorf("error executing template: %v", err)
 			}
 
+			metadataReader := &MetaDataReader{outputWriter}
 			mediaSorter := &MediaSorter{
 				DestDir:         destDir,
 				PathTemplate:    pathTemplate,
 				FileProcessor:   fileProcessor,
-				MetadataReader:  &MetaDataReader{outputWriter},
+				MetadataReader:  metadataReader,
 				OverrideChecker: overrideChecker,
 				OutputWriter:    outputWriter,
 			}
 
-			// TODO check if srcDir is a file and create manual MediaFile if it's not a directory. Then call ProcessFileGroup
+			fi, err := os.Stat(srcDir)
+			if err != nil {
+				return fmt.Errorf("error getting file info for %s: %v", srcDir, err)
+			}
 
-			return mediaSorter.Sort(srcDir)
+			// Check if source directory is a file or directory
+			if fi.IsDir() {
+				return mediaSorter.Sort(srcDir)
+			}
+
+			// Process single file
+			fg, err := metadataReader.GetFileGroup([]string{srcDir})
+			if err != nil {
+				return err
+			}
+			return mediaSorter.ProcessFileGroup(fg)
 		},
 	}
 

@@ -14,7 +14,21 @@ but with a different suffix), the tool will rename them as well.
 
     go run . srcPath destPath
 
+`srcPath` can be a directory or a single file. `destPath` must either not exist or be a directory.
+
+### Command line flags
+
+    -d, --dry-run   Show old and new name without overriding
+    -m, --move      Move files instead of copying them
+    --override      Override existing files
+    -t, --template  Specify a custom template file.
+    -v, --verbose   show verbose output
+    -h, --help      show this help message and exit
+
 ## Template syntax
+
+The custom template files follow the regular Go template syntax.
+See https://golang.org/pkg/text/template/ for more information.
 
 Enclose placeholders for file metadata in two curly brackets.
 
@@ -40,7 +54,7 @@ Have a look at the file `example.tmpl` to see an example.
 #### pathSep
 
 A function with no arguments that creates a path separator in the file name.
-You can use this function to make path separators more visible than using 
+You can use this function to make path separators more visible than using
 a slash ("/").
 
 #### removeBrackets
@@ -55,7 +69,7 @@ will remove all content in square and round brackets:
 ```
 
 If you want to target specific content in brackets, you can put the words that
-should trigger the removal inside the brackets. If you have more than one 
+should trigger the removal inside the brackets. If you have more than one
 "match word", separate the words with comma:
 
 ```
@@ -77,7 +91,7 @@ Similar to `removeBrackets`, but allows you to specify a replacement:
 
 ## Future ideas
 
-- Configurable templates, configure from config directory
+- Configuration directory, with templates. Template parameter will search for a template file in the configuration directory if the software can't find the template relative to the current working directory.
 - Add more functions in the templates - case change, transliterate Unicode
     characters to ASCII, etc.
 - Improve verbose output - show when we move sidecar files
