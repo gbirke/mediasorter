@@ -25,6 +25,16 @@ var defaultPathTemplate = `
 	{{- .Title -}}
 `
 
+type Config struct {
+	SrcDir    string
+	DestDir   string
+	DryRun    bool
+	Move      bool
+	Override  bool
+	Template  string
+	Verbosity Verbosity
+}
+
 type OverrideChecker interface {
 	DestinationFileExists(destPath string) bool
 }
@@ -235,6 +245,145 @@ func (m *MediaSorter) Sort(srcDir string) error {
 	return nil
 }
 
+func buildConfig(cmd *cli.Command, verbosity int) (*Config, error) {
+	srcDir := cmd.StringArg("srcDir")
+	destDir := cmd.StringArg("destDir")
+
+	if srcDir == "" {
+		return nil, fmt.Errorf("Source directory is required")
+	}
+
+	return &Config{
+		SrcDir:    srcDir,
+		DestDir:   destDir,
+		DryRun:    cmd.Bool("dry-run"),
+		Move:      cmd.Bool("move"),
+		Override:  cmd.Bool("override"),
+		Template:  cmd.String("template"),
+		Verbosity: Verbosity(verbosity),
+	}, nil
+}
+
+func createOutputWriter(config *Config) *OutputWriter {
+	outputWriter := &OutputWriter{Quiet}
+	if config.Verbosity == Verbose {
+		outputWriter.Verbosity = Verbose
+	} else if config.Verbosity >= Debug {
+		outputWriter.Verbosity = Debug
+	}
+	return outputWriter
+}
+
+func determineFileProcessor(config *Config, outputWriter *OutputWriter) FileProcessor {
+	var fileProcessor = CopyFile
+	if config.Move {
+		if config.DryRun {
+			outputWriter.Warn("Dry run mode is not compatible with move operation, no files will be moved")
+		}
+		fileProcessor = MoveFile
+	}
+	if config.DryRun {
+		fileProcessor = DryRunFileProcessor
+		// Dry run mode should always be verbose to show what would happen
+		if config.Verbosity < Verbose {
+			outputWriter.Verbosity = Verbose
+		}
+	}
+	return fileProcessor
+}
+
+func determineOverrideChecker(config *Config) OverrideChecker {
+	var overrideChecker OverrideChecker = &NoOverrideChecker{}
+	if config.Override {
+		overrideChecker = &MemoryOverrideChecker{SeenFiles: make(map[string]struct{})}
+	}
+	return overrideChecker
+}
+
+func createPathTemplate(templatePath string) (*template.Template, error) {
+	var templateStr = defaultPathTemplate
+	if templatePath != "" {
+		templateFileContents, err := os.ReadFile(templatePath)
+		if err != nil {
+			return nil, fmt.Errorf("error reading template file %s: %v", templatePath, err)
+		}
+		templateStr = string(templateFileContents)
+	}
+
+	pathTemplate, err := template.New("path").Funcs(template.FuncMap{
+		// Path separator function to make the separator more visible in templates than a simple "/"
+		"pathSep":           func() string { return "/" },
+		"replaceInBrackets": ReplaceInBrackets,
+		"removeBrackets":    RemoveBrackets,
+		// TODO add more custom functions for normalizing names:
+		// - underscores instead of spaces
+		// - transform unicode
+		// - etc
+	}).Parse(templateStr)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing template: %v", err)
+	}
+	// Check if template is valid by executing it with a dummy Metadata struct
+	if err := pathTemplate.Execute(io.Discard, &Metadata{}); err != nil {
+		return nil, fmt.Errorf("error executing template: %v", err)
+	}
+
+	return pathTemplate, nil
+}
+
+func createMediaSorter(config *Config) (*MediaSorter, error) {
+	outputWriter := createOutputWriter(config)
+	fileProcessor := determineFileProcessor(config, outputWriter)
+	overrideChecker := determineOverrideChecker(config)
+
+	pathTemplate, err := createPathTemplate(config.Template)
+	if err != nil {
+		return nil, err
+	}
+
+	return &MediaSorter{
+		DestDir:         config.DestDir,
+		PathTemplate:    pathTemplate,
+		FileProcessor:   fileProcessor,
+		MetadataReader:  &MetaDataReader{outputWriter},
+		OverrideChecker: overrideChecker,
+		OutputWriter:    outputWriter,
+	}, nil
+}
+
+func processInput(srcDir string, mediaSorter *MediaSorter) error {
+	fi, err := os.Stat(srcDir)
+	if err != nil {
+		return fmt.Errorf("error getting file info for %s: %v", srcDir, err)
+	}
+
+	// Check if source directory is a file or directory
+	if fi.IsDir() {
+		return mediaSorter.Sort(srcDir)
+	}
+
+	// Process single file
+	fg, err := mediaSorter.MetadataReader.GetFileGroup([]string{srcDir})
+	if err != nil {
+		return err
+	}
+	return mediaSorter.ProcessFileGroup(fg)
+}
+
+func run(_ context.Context, cmd *cli.Command, verbosity int) error {
+	config, err := buildConfig(cmd, verbosity)
+	if err != nil {
+		return err
+	}
+
+	mediaSorter, err := createMediaSorter(config)
+	if err != nil {
+		return err
+	}
+
+	return processInput(config.SrcDir, mediaSorter)
+}
+
 func main() {
 	var verbosity int
 	app := &cli.Command{
@@ -281,95 +430,7 @@ func main() {
 		},
 		ArgsUsage: "<source directory> [destination directory]",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			srcDir := cmd.StringArg("srcDir")
-			destDir := cmd.StringArg("destDir")
-
-			if srcDir == "" {
-				// TODO show usage here, after the error message
-				return cli.Exit("Source directory is required", 1)
-			}
-
-			outputWriter := &OutputWriter{Quiet}
-			if Verbosity(verbosity) == Verbose {
-				outputWriter.Verbosity = Verbose
-			} else if Verbosity(verbosity) >= Debug {
-				outputWriter.Verbosity = Debug
-			}
-
-			var fileProcessor = CopyFile
-			if cmd.Bool("move") {
-				if cmd.Bool("dry-run") {
-					outputWriter.Warn("Dry run mode is not compatible with move operation, no files will be moved")
-				}
-				fileProcessor = MoveFile
-			}
-			if cmd.Bool("dry-run") {
-				fileProcessor = DryRunFileProcessor
-				// Dry run mode should always be verbose to show what would happen
-				if Verbosity(verbosity) < Verbose {
-					outputWriter.Verbosity = Verbose
-				}
-			}
-
-			var overrideChecker OverrideChecker = &NoOverrideChecker{}
-			if cmd.Bool("override") {
-				overrideChecker = &MemoryOverrideChecker{SeenFiles: make(map[string]struct{})}
-			}
-
-			var templateStr = defaultPathTemplate
-			if cmd.String("template") != "" {
-				templateFilePath := cmd.String("template")
-				templateFileContents, err := os.ReadFile(templateFilePath)
-				if err != nil {
-					return fmt.Errorf("error reading template file %s: %v", templateFilePath, err)
-				}
-				templateStr = string(templateFileContents)
-			}
-
-			pathTemplate, err := template.New("path").Funcs(template.FuncMap{
-				// Path separator function to make the separator more visible in templates than a simple "/"
-				"pathSep":           func() string { return "/" },
-				"replaceInBrackets": ReplaceInBrackets,
-				"removeBrackets":    RemoveBrackets,
-				// TODO add more custom functions for normalizing names:
-				// - underscores instead of spaces
-				// - transform unicode
-				// - etc
-			}).Parse(templateStr)
-			if err != nil {
-				return fmt.Errorf("error parsing template: %v", err)
-			}
-			// Check if template is valid by executing it with a dummy Metadata struct
-			if err := pathTemplate.Execute(io.Discard, &Metadata{}); err != nil {
-				return fmt.Errorf("error executing template: %v", err)
-			}
-
-			metadataReader := &MetaDataReader{outputWriter}
-			mediaSorter := &MediaSorter{
-				DestDir:         destDir,
-				PathTemplate:    pathTemplate,
-				FileProcessor:   fileProcessor,
-				MetadataReader:  metadataReader,
-				OverrideChecker: overrideChecker,
-				OutputWriter:    outputWriter,
-			}
-
-			fi, err := os.Stat(srcDir)
-			if err != nil {
-				return fmt.Errorf("error getting file info for %s: %v", srcDir, err)
-			}
-
-			// Check if source directory is a file or directory
-			if fi.IsDir() {
-				return mediaSorter.Sort(srcDir)
-			}
-
-			// Process single file
-			fg, err := metadataReader.GetFileGroup([]string{srcDir})
-			if err != nil {
-				return err
-			}
-			return mediaSorter.ProcessFileGroup(fg)
+			return run(ctx, cmd, verbosity)
 		},
 	}
 
