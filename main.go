@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -14,6 +15,8 @@ import (
 	"github.com/dhowden/tag"
 	"github.com/urfave/cli/v3"
 )
+
+var ErrConfig = errors.New("command line error")
 
 // TODO read template from file, explain whitespace trimming and placeholders in README
 var defaultPathTemplate = `
@@ -250,7 +253,11 @@ func buildConfig(cmd *cli.Command, verbosity int) (*Config, error) {
 	destDir := cmd.StringArg("destDir")
 
 	if srcDir == "" {
-		return nil, fmt.Errorf("Source directory is required")
+		return nil, fmt.Errorf("%w: source directory is required", ErrConfig)
+	}
+
+	if cmd.Bool("dry-run") && cmd.Bool("move") {
+		return nil, fmt.Errorf("%w: cannot use both --dry-run and --move flags together", ErrConfig)
 	}
 
 	return &Config{
@@ -435,7 +442,15 @@ func main() {
 	}
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
-		fmt.Fprint(os.Stderr, err.Error())
+
+		if errors.Is(err, ErrConfig) {
+			fmt.Println(err.Error())
+			fmt.Fprint(os.Stderr, "\n")
+			cli.ShowAppHelp(app)
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
+		}
+
 		os.Exit(1)
 	}
 }
