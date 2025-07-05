@@ -1,8 +1,9 @@
 # Audio file mover
 
 This command line tool moves/copies audio files in a directory according
-to their metadata and a path template (using Go template syntax), creating
-subdirectories as needed.
+to their metadata and a path template (using [Go template
+syntax](https://pkg.go.dev/text/template)), creating subdirectories as
+needed.
 
 The tool sanitizes the file names coming from the template, to avoid path
 traversal, extra directories and hard-to-escape file names on the shell.
@@ -17,7 +18,9 @@ FLAC.
 
 ## Usage
 
-    go run . srcPath destPath
+```shell
+mediamover srcPath destPath
+```
 
 `srcPath` can be a directory or a single file.
 
@@ -34,8 +37,9 @@ FLAC.
 
 ## Template syntax
 
-The custom template files follow the regular Go template syntax.
-See https://golang.org/pkg/text/template/ for more information.
+The custom template files follow the regular Go template syntax. See
+[https://golang.org/pkg/text/template/](https://golang.org/pkg/text/template/)
+for more information.
 
 Enclose placeholders for file metadata in two curly brackets.
 
@@ -98,7 +102,31 @@ Similar to `removeBrackets`, but allows you to specify a replacement:
 
 ## Future ideas
 
-- Configuration directory, with templates. Template parameter will search for a template file in the configuration directory if the software can't find the template relative to the current working directory.
+- I have to come up with better handling with songs from *compilation albums* where
+   `AlbumArtist` is empty or different for every track.
+  - Can I have a complex template that checks for compilation albums and sorts them differently?
+  - Is there a flag to mark compilation albums?
+- Configuration directory, with templates. Template parameter will search for a
+    template file in the configuration directory if the software can't find the
+    template relative to the current working directory.
 - Add more functions in the templates - case change, transliterate Unicode
     characters to ASCII, etc.
 - Improve verbose output - show when we move sidecar files
+
+## Alternatives to this software
+
+I wrote this software because I wanted two features that I could not find in other tools:
+
+- Metadata from the files, not external media databases
+- Creating artist- and album-centered directory structures from a flat file list
+
+The software I tried may or may not have these features, but I could not
+easily find them. But of course, they have lots of other cool features,
+that `mediamover` does not.
+
+- [filebot](https://www.filebot.net/) A cross-platform media file organization
+    tool with GUI support, scripting capabilities, media database integration, and more.
+- [musicbrainz picard](https://picard.musicbrainz.org/) Another cross-platform 
+     media file organization tool with GUI support, using the open source music database MusicBrainz.
+- [beets](https://beets.io/) A music library manager that can organize your music 
+     collection, tag files, and more.
