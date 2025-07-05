@@ -361,7 +361,10 @@ func createMediaSorter(config *Config) (*MediaSorter, error) {
 func processInput(srcDir string, mediaSorter *MediaSorter) error {
 	fi, err := os.Stat(srcDir)
 	if err != nil {
-		return fmt.Errorf("error getting file info for %s: %v", srcDir, err)
+		if os.IsNotExist(err) {
+			return fmt.Errorf("source directory %s does not exist", srcDir)
+		}
+		return fmt.Errorf("error getting file system information for source directory %s: %w", srcDir, err)
 	}
 
 	// Check if source directory is a file or directory
