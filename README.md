@@ -19,7 +19,7 @@ FLAC.
 ## Usage
 
 ```shell
-mediamover srcPath destPath
+medisorter srcPath destPath
 ```
 
 `srcPath` can be a directory or a single file.
