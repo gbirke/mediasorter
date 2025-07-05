@@ -358,31 +358,32 @@ func createMediaSorter(config *Config) (*MediaSorter, error) {
 	}, nil
 }
 
-func processInput(srcDir string, mediaSorter *MediaSorter) error {
-	fi, err := os.Stat(srcDir)
+func validatePaths(srcPath, destPath string) error {
+	// Check source exists and get its info
+	fi, err := os.Stat(srcPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("source directory %s does not exist", srcDir)
+			return fmt.Errorf("source directory %s does not exist", srcPath)
 		}
-		return fmt.Errorf("error getting file system information for source directory %s: %w", srcDir, err)
+		return fmt.Errorf("error getting file system information for source directory %s: %w", srcPath, err)
 	}
 
-	// Check if source and destination are the same path or if destination is inside source
+	// Determine source directory path for comparison
 	var srcDirPath string
 	if fi.IsDir() {
-		srcDirPath = srcDir
+		srcDirPath = srcPath
 	} else {
-		// For single files, compare the directory containing the file
-		srcDirPath = filepath.Dir(srcDir)
+		srcDirPath = filepath.Dir(srcPath)
 	}
 
+	// Check path relationships
 	absSrcDir, err := filepath.Abs(srcDirPath)
 	if err != nil {
 		return fmt.Errorf("error resolving absolute path for source directory %s: %w", srcDirPath, err)
 	}
-	absDestDir, err := filepath.Abs(mediaSorter.DestDir)
+	absDestDir, err := filepath.Abs(destPath)
 	if err != nil {
-		return fmt.Errorf("error resolving absolute path for destination directory %s: %w", mediaSorter.DestDir, err)
+		return fmt.Errorf("error resolving absolute path for destination directory %s: %w", destPath, err)
 	}
 
 	rel, err := filepath.Rel(absSrcDir, absDestDir)
@@ -396,19 +397,33 @@ func processInput(srcDir string, mediaSorter *MediaSorter) error {
 		return fmt.Errorf("destination directory %s is inside source directory %s", absDestDir, absSrcDir)
 	}
 
+	// When the source is a file, we rely on the processing logic to return errors if the destination can't be written to
 	if fi.IsDir() {
-		destFi, err := os.Stat(mediaSorter.DestDir)
+		destFi, err := os.Stat(destPath)
 		if err != nil {
 			if !os.IsNotExist(err) {
-				return fmt.Errorf("error getting file system information for destination directory %s: %w", mediaSorter.DestDir, err)
+				return fmt.Errorf("error getting file system information for destination directory %s: %w", destPath, err)
 			}
 			// Destination doesn't exist, which is fine - it will be created
-		} else {
-			// Destination exists, check if it's a directory
-			if !destFi.IsDir() {
-				return fmt.Errorf("destination %s is not a directory", mediaSorter.DestDir)
-			}
+		} else if !destFi.IsDir() {
+			return fmt.Errorf("destination %s is not a directory", destPath)
 		}
+	}
+
+	return nil
+}
+
+func processInput(srcDir string, mediaSorter *MediaSorter) error {
+	if err := validatePaths(srcDir, mediaSorter.DestDir); err != nil {
+		return err
+	}
+
+	fi, err := os.Stat(srcDir)
+	if err != nil {
+		return err // Should not happen after validatePaths, but we have to handle errors
+	}
+
+	if fi.IsDir() {
 		return mediaSorter.Sort(srcDir)
 	}
 
