@@ -6,6 +6,9 @@ result
 # ignore goreleaser artifacts
 dist/
 
+# ignore built binary from `go build .`
+mediasorter
+
 # Ignore artifacts from the bullshit machine
 .aider*
 
