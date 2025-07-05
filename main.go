@@ -367,6 +367,35 @@ func processInput(srcDir string, mediaSorter *MediaSorter) error {
 		return fmt.Errorf("error getting file system information for source directory %s: %w", srcDir, err)
 	}
 
+	// Check if source and destination are the same path or if destination is inside source
+	var srcDirPath string
+	if fi.IsDir() {
+		srcDirPath = srcDir
+	} else {
+		// For single files, compare the directory containing the file
+		srcDirPath = filepath.Dir(srcDir)
+	}
+
+	absSrcDir, err := filepath.Abs(srcDirPath)
+	if err != nil {
+		return fmt.Errorf("error resolving absolute path for source directory %s: %w", srcDirPath, err)
+	}
+	absDestDir, err := filepath.Abs(mediaSorter.DestDir)
+	if err != nil {
+		return fmt.Errorf("error resolving absolute path for destination directory %s: %w", mediaSorter.DestDir, err)
+	}
+
+	rel, err := filepath.Rel(absSrcDir, absDestDir)
+	if err != nil {
+		return fmt.Errorf("error determining relative path from source to destination: %w", err)
+	}
+	if rel == "." {
+		return fmt.Errorf("source and destination directories are the same: %s", absSrcDir)
+	}
+	if !strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("destination directory %s is inside source directory %s", absDestDir, absSrcDir)
+	}
+
 	if fi.IsDir() {
 		destFi, err := os.Stat(mediaSorter.DestDir)
 		if err != nil {
