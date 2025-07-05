@@ -367,8 +367,19 @@ func processInput(srcDir string, mediaSorter *MediaSorter) error {
 		return fmt.Errorf("error getting file system information for source directory %s: %w", srcDir, err)
 	}
 
-	// Check if source directory is a file or directory
 	if fi.IsDir() {
+		destFi, err := os.Stat(mediaSorter.DestDir)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return fmt.Errorf("error getting file system information for destination directory %s: %w", mediaSorter.DestDir, err)
+			}
+			// Destination doesn't exist, which is fine - it will be created
+		} else {
+			// Destination exists, check if it's a directory
+			if !destFi.IsDir() {
+				return fmt.Errorf("destination %s is not a directory", mediaSorter.DestDir)
+			}
+		}
 		return mediaSorter.Sort(srcDir)
 	}
 
