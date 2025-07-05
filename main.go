@@ -397,17 +397,15 @@ func validatePaths(srcPath, destPath string) error {
 		return fmt.Errorf("destination directory %s is inside source directory %s", absDestDir, absSrcDir)
 	}
 
-	// When the source is a file, we rely on the processing logic to return errors if the destination can't be written to
-	if fi.IsDir() {
-		destFi, err := os.Stat(destPath)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				return fmt.Errorf("error getting file system information for destination directory %s: %w", destPath, err)
-			}
-			// Destination doesn't exist, which is fine - it will be created
-		} else if !destFi.IsDir() {
-			return fmt.Errorf("destination %s is not a directory", destPath)
+	// Check if destination directory exists and is a directory
+	destFi, err := os.Stat(destPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("error getting file system information for destination directory %s: %w", destPath, err)
 		}
+		// Destination doesn't exist, which is fine - it will be created
+	} else if !destFi.IsDir() {
+		return fmt.Errorf("destination %s is not a directory", destPath)
 	}
 
 	return nil
