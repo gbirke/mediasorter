@@ -3,6 +3,9 @@
 result
 .direnv/
 
+# ignore goreleaser artifacts
+dist/
+
 # Ignore artifacts from the bullshit machine
 .aider*
 
