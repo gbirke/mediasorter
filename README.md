@@ -11,7 +11,7 @@ traversal, extra directories and hard-to-escape file names on the shell.
 If a file has "sidecar" files (files with the same name as the media file
 but with a different suffix), the tool will rename them as well.
 
-Supported Audio Formats: Using the library
+**Supported Audio Formats**: Using the Go library
 [dhowden/tag](https://github.com/dhowden/tag), `mediamover` supports
 metadata from  MP3 (ID3v1,2.{2,3,4}) and MP4 (ACC, M4A, ALAC), OGG and
 FLAC.
